@@ -4,11 +4,16 @@ Downloads attack + benign prompts, labels them, saves a combined dataset.
 label: 1 = malicious (attack/jailbreak), 0 = benign (safe)
 """
 import truststore
-truststore.inject_into_ssl()   # office network SSL
-
+truststore.inject_into_ssl() 
+import os
 import pandas as pd
 from datasets import load_dataset
 from pathlib import Path
+from dotenv import load_dotenv
+load_dotenv(dotenv_path=Path(__file__).parent.parent / ".env")
+HF_TOKEN = os.getenv("HF_TOKEN")  # office network SSL
+
+
 
 OUT = Path(__file__).parent.parent / "data" / "combined.csv"
 
@@ -39,6 +44,17 @@ def load_jbb():
         print("JailbreakBench failed:", e)
     return rows
 
+def load_advbench():
+    """AdvBench: 520 harmful behaviors (gated - uses HF_TOKEN)."""
+    rows = []
+    try:
+        adv = load_dataset("walledai/AdvBench", split="train", token=HF_TOKEN)
+        for r in adv:
+            rows.append({"text": r["prompt"], "label": 1, "source": "AdvBench"})
+        print(f"AdvBench: {len(adv)} attack prompts")
+    except Exception as e:
+        print("AdvBench failed:", e)
+    return rows
 
 def load_alpaca(n):
     """Alpaca normal instructions as extra benign."""
@@ -55,7 +71,7 @@ def load_alpaca(n):
 
 
 def main():
-    rows = load_main() + load_jbb()
+    rows = load_main() + load_jbb() + load_advbench()
     attacks = sum(1 for r in rows if r["label"] == 1)
     benign = sum(1 for r in rows if r["label"] == 0)
     # top up benign with Alpaca so classes are roughly balanced

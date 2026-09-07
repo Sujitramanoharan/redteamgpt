@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>About - RedTeamGPT</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <nav>
+    <span class="logo">RedTeamGPT</span>
+    <a href="index.html">Detector</a>
+    <a href="about.html" class="active">About</a>
+  </nav>
+  <div class="container">
+    <h1>About RedTeamGPT</h1>
+    <p class="subtitle">An adversarial robustness framework for enterprise LLMs.</p>
+    <div class="card">
+      <h3 style="margin-bottom:8px">The Problem</h3>
+      <p>Enterprise LLMs can be hijacked through their input. Jailbreaks bypass safety rules and prompt injection hides malicious instructions inside content the model reads. Attackers reword attacks to evade naive keyword filters.</p>
+    </div>
+    <div class="card">
+      <h3 style="margin-bottom:8px">How It Works</h3>
+      <p>A lightweight DistilBERT classifier acts as a content firewall, inspecting every prompt before it reaches the LLM and blocking malicious ones. Trained on real jailbreak and benign prompts, it runs on CPU for on-premise deployment.</p>
+    </div>
+    <div class="card">
+      <h3 style="margin-bottom:8px">Performance</h3>
+      <p>ROC-AUC 0.996, recall 0.98 on held-out attacks. The framework also evaluates robustness against reworded (evasion) attacks &mdash; the key research contribution.</p>
+    </div>
+  </div>
+</body>
+</html>
