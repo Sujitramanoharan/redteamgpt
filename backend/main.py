@@ -20,7 +20,9 @@ class PromptRequest(BaseModel):
 @app.post("/api/check")
 def check(req: PromptRequest):
     return detect(req.prompt)
-
+@app.get("/health")
+def health():
+    return {"status": "ok"}
 
 @app.get("/")
 def home():
