@@ -82,7 +82,7 @@ export default function TelemetryTab() {
         <div className="kpi-card card">
           <span className="kpi-title">Avg Latency</span>
           <div className="kpi-val text-cyan">{t.avg_latency_ms || 0} ms</div>
-          <span className="kpi-sub">Sub-millisecond inference</span>
+          <span className="kpi-sub">Mean firewall scan time</span>
         </div>
         <div className="kpi-card card">
           <span className="kpi-title">Average Risk Score</span>

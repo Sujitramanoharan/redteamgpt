@@ -406,6 +406,32 @@ def _build_explanation(prompt: str, category: str, is_malicious: bool,
     }
 
 
+_B64_RE = re.compile(r"[A-Za-z0-9+/]{16,}={0,2}")
+
+
+def _decode_hidden_payloads(text: str) -> list[str]:
+    """Return any readable text hidden inside base64 blobs.
+
+    Encoding is the whole point of this attack: the surface text reads as an
+    innocent request while the real instruction rides along encoded, invisible
+    to both the classifier and the keyword rules. Decoding first means the
+    payload is judged on what it actually says.
+    """
+    found = []
+    for match in _B64_RE.finditer(text):
+        blob = match.group(0)
+        try:
+            raw = base64.b64decode(blob + "=" * (-len(blob) % 4), validate=False)
+            decoded = raw.decode("utf-8", errors="strict")
+        except (ValueError, UnicodeDecodeError):
+            continue
+        # Require mostly printable text, else it is binary noise, not an instruction.
+        printable = sum(c.isprintable() or c.isspace() for c in decoded)
+        if len(decoded) >= 8 and printable / len(decoded) > 0.9:
+            found.append(decoded)
+    return found
+
+
 def detect(prompt: str) -> dict:
     """Classify prompt security, risk level, threat category, and latency."""
     t0 = time.perf_counter()
@@ -447,6 +473,27 @@ def detect(prompt: str) -> dict:
     detected_tokens = _extract_threat_tokens(p_clean)
     has_critical = any(t["severity"] == "critical" for t in detected_tokens)
 
+    # Decoded payloads are scanned as if they had been typed in plain text.
+    for decoded in _decode_hidden_payloads(p_clean):
+        hidden_tokens = _extract_threat_tokens(decoded)
+        hidden_prob, _ = _score_windows(decoded)
+        if hidden_tokens or hidden_prob >= settings.decision_threshold:
+            detected_tokens.append({
+                "text": decoded[:80],
+                "category": "Encoded Payload",
+                "severity": "critical",
+                "explanation": (
+                    "Decoded from encoded text hidden in the prompt. Concealed "
+                    f"instruction reads: \"{decoded[:120]}\". Encoding is used to "
+                    "slip banned instructions past filters that only read plain text."
+                ),
+                "start": 0,
+                "end": 0,
+            })
+            malicious_prob = max(malicious_prob, hidden_prob, 0.9)
+            is_malicious = True
+            has_critical = True
+
     # A single "high" hit can be innocent ("how do I disable security warnings?"),
     # but two independent high-severity categories co-occurring is corroboration.
     high_categories = {t["category"] for t in detected_tokens if t["severity"] == "high"}
@@ -486,7 +533,8 @@ def detect(prompt: str) -> dict:
             category = "Harmful Content Request"
         elif any("Harmful" in t["category"] for t in detected_tokens):
             category = "Harmful Execution / Malware"
-        elif any("Obfuscation" in t["category"] for t in detected_tokens):
+        elif any(t["category"] in ("Obfuscation Attempt", "Encoded Payload")
+                 for t in detected_tokens):
             category = "Adversarial Obfuscation"
         elif detected_tokens:
             category = "Prompt Injection / Policy Violation"

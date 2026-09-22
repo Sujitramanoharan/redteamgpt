@@ -896,6 +896,14 @@ textarea:focus, input[type="text"]:focus {
 .chat-line:last-child { margin-bottom: 0; }
 .chat-line.blank { height: 2px; margin: 0; }
 
+.chat-heading {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--color-cyan);
+  margin: 14px 0 6px;
+}
+.chat-heading:first-child { margin-top: 0; }
+
 .chat-bubble.typing { display: flex; gap: 5px; padding: 15px; width: fit-content; }
 .chat-bubble.typing span {
   width: 7px; height: 7px; border-radius: 50%;
