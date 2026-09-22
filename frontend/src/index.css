@@ -69,7 +69,8 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 28px;
+  gap: 16px;
+  padding: 14px 20px;
   background: rgba(17, 24, 39, 0.85);
   backdrop-filter: blur(12px);
   border-bottom: 1px solid var(--border-color);
@@ -82,7 +83,14 @@ body {
   display: flex;
   align-items: center;
   gap: 12px;
+  flex-shrink: 0;
 }
+
+.brand-text .logo-title,
+.brand-text .logo-subtitle,
+.status-indicator-badge { white-space: nowrap; }
+
+.status-indicator-badge { flex-shrink: 0; }
 
 .logo-shield {
   width: 42px;
@@ -121,22 +129,30 @@ body {
 /* Navigation Tabs */
 .nav-tabs {
   display: flex;
-  gap: 6px;
+  gap: 4px;
   background: rgba(0, 0, 0, 0.35);
   padding: 4px;
   border-radius: 10px;
   border: 1px solid var(--border-color);
+  /* Seven tabs no longer fit on a laptop screen; scroll rather than wrap
+     each label onto two cramped lines. */
+  overflow-x: auto;
+  scrollbar-width: none;
 }
+
+.nav-tabs::-webkit-scrollbar { display: none; }
 
 .nav-tab {
   background: transparent;
   border: none;
   color: var(--text-secondary);
-  padding: 8px 16px;
-  font-size: 13px;
+  padding: 8px 12px;
+  font-size: 12.5px;
   font-weight: 600;
   border-radius: 6px;
   cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   gap: 8px;
