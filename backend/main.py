@@ -13,7 +13,8 @@ for _p in (str(_HERE), str(_HERE.parent / "src")):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
+from fastapi import (Depends, FastAPI, File, HTTPException, Query, Request,
+                     UploadFile, status)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
@@ -225,6 +226,65 @@ def openai_proxy(req: OpenAIChatCompletionRequest, request: Request,
         },
         "guardrail_telemetry": result,
     }
+
+
+# --- Document scanning ----------------------------------------------------
+@app.post("/api/scan-document", tags=["security"])
+async def scan_document_endpoint(
+    request: Request,
+    file: UploadFile = File(...),
+    client_id: str = Depends(require_api_key),
+):
+    """Scan an uploaded document for hidden injection instructions.
+
+    Guards against indirect prompt injection: the attacker plants the
+    instruction in a file rather than typing it, so the victim uploads an
+    ordinary-looking document and the AI reading it obeys the payload.
+    """
+    from document_scanner import DocumentError, SUPPORTED, scan_document
+
+    suffix = Path(file.filename or "").suffix.lower()
+    if suffix not in SUPPORTED:
+        raise HTTPException(
+            status_code=415,
+            detail=f"Unsupported file type. Supported: {', '.join(sorted(SUPPORTED))}",
+        )
+
+    data = await file.read(settings.max_upload_bytes + 1)
+    if len(data) > settings.max_upload_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File exceeds {settings.max_upload_bytes // (1024 * 1024)}MB limit.",
+        )
+    if not data:
+        raise HTTPException(status_code=400, detail="File is empty.")
+
+    try:
+        result = scan_document(file.filename, data)
+    except DocumentError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except Exception:
+        logger.exception("Document scan failed for %s", file.filename)
+        raise HTTPException(status_code=500, detail="Could not scan this document.")
+
+    # Record one audit entry for the document rather than one per passage.
+    store.record(
+        {
+            "prompt": f"[document] {file.filename}",
+            "verdict": result["verdict"],
+            "malicious": result["malicious"],
+            "category": result["category"],
+            "risk_score": result["risk_score"],
+            "risk_level": (result["priority"] or {}).get("label"),
+            "priority": result["priority"],
+            "confidence": None,
+            "latency_ms": None,
+            "timestamp": None,
+        },
+        client_id=client_id,
+        request_id=request.headers.get("x-request-id"),
+    )
+    return result
 
 
 # --- Conversational assistant --------------------------------------------

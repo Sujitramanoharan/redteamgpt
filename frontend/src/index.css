@@ -727,6 +727,100 @@ textarea:focus, input[type="text"]:focus {
   color: var(--text-secondary);
 }
 
+/* ---------- Document scanner ---------- */
+.upload-zone {
+  border: 2px dashed var(--border-color);
+  border-radius: 14px;
+  padding: 44px 24px;
+  text-align: center;
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.02);
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.upload-zone:hover, .upload-zone.dragging {
+  border-color: var(--color-cyan);
+  background: rgba(6, 182, 212, 0.05);
+}
+
+.upload-zone.busy { cursor: progress; border-color: var(--color-cyan); }
+
+.upload-icon {
+  width: 58px;
+  height: 58px;
+  margin: 0 auto 14px;
+  border-radius: 15px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(6, 182, 212, 0.12);
+  border: 1px solid rgba(6, 182, 212, 0.3);
+  color: var(--color-cyan);
+}
+
+.upload-zone h3 { font-size: 15px; margin-bottom: 5px; }
+.upload-zone p { color: var(--text-muted); font-size: 12.5px; }
+
+.spin { animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.doc-results { margin-top: 20px; }
+
+.doc-finding {
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid var(--border-color);
+  border-left: 3px solid var(--color-danger);
+  border-radius: 10px;
+  padding: 14px 16px;
+}
+
+.doc-finding-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+
+.doc-finding-title { font-size: 13px; font-weight: 700; color: var(--text-primary); }
+
+.doc-quote {
+  background: rgba(239, 68, 68, 0.07);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.doc-quote-label {
+  display: block;
+  font-size: 9.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--color-danger);
+  margin-bottom: 5px;
+}
+
+.doc-quote pre {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: #fca5a5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.doc-finding-why {
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  line-height: 1.65;
+  margin: 10px 0 0;
+}
+
+.text-danger { color: var(--color-danger); }
+
 /* ---------- Assistant / Chat ---------- */
 .chat-window {
   display: flex;

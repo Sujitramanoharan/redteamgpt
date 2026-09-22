@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     rate_limit_per_minute: int = 60
     max_prompt_chars: int = 20_000
     max_batch_size: int = 50
+    max_upload_bytes: int = 5 * 1024 * 1024
 
     # --- Model ------------------------------------------------------------
     # Local dir wins when present; otherwise the Hub id is pulled at boot so a
