@@ -63,7 +63,11 @@ export default function InspectorTab({ onScanComplete }) {
           newParts.push(s);
           if (idx < split.length - 1) {
             newParts.push(
-              <span key={`${term}-${idx}`} className={`token-badge ${t.severity || 'high'}`}>
+              <span
+                key={`${term}-${idx}`}
+                className={`token-badge ${t.severity || 'high'}`}
+                title={t.explanation || t.category}
+              >
                 {term}
               </span>
             );
@@ -162,10 +166,80 @@ export default function InspectorTab({ onScanComplete }) {
                   <span className="verdict-label">{result.verdict}</span>
                   <span className="verdict-action">ACTION: {result.action}</span>
                 </div>
-                <div className="verdict-risk-badge">
-                  {result.risk_level} ({result.risk_score}/100)
+                <div className="verdict-badges">
+                  {result.priority && (
+                    <div
+                      className="verdict-priority-badge"
+                      style={{ backgroundColor: result.priority.color }}
+                      title={result.priority.meaning}
+                    >
+                      {result.priority.level} · {result.priority.label}
+                    </div>
+                  )}
+                  <div className="verdict-risk-badge">
+                    {result.risk_level} ({result.risk_score}/100)
+                  </div>
                 </div>
               </div>
+
+              {/* Plain-English explanation */}
+              {result.explanation && (
+                <div className={`explain-card ${isBlocked ? 'blocked' : 'allowed'}`}>
+                  <div className="explain-headline">
+                    {isBlocked ? <AlertTriangle size={18} /> : <CheckCircle2 size={18} />}
+                    <span>{result.explanation.headline}</span>
+                  </div>
+
+                  <div className="explain-section">
+                    <span className="explain-label">What this prompt is trying to do</span>
+                    <p>{result.explanation.what_it_means}</p>
+                  </div>
+
+                  {result.explanation.why_risky && (
+                    <div className="explain-section">
+                      <span className="explain-label">Why that is dangerous</span>
+                      <p>{result.explanation.why_risky}</p>
+                    </div>
+                  )}
+
+                  <div className="explain-section">
+                    <span className="explain-label">How the firewall decided</span>
+                    <p>{result.explanation.how_we_know}</p>
+                  </div>
+
+                  {result.explanation.evidence?.length > 0 && (
+                    <div className="explain-section">
+                      <span className="explain-label">
+                        Evidence found ({result.explanation.evidence.length})
+                      </span>
+                      <ul className="evidence-list">
+                        {result.explanation.evidence.map((ev, i) => (
+                          <li key={i} className={`evidence-item ${ev.severity}`}>
+                            <code className="evidence-phrase">"{ev.phrase}"</code>
+                            <span className="evidence-reason">{ev.reason}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  <div className="explain-section priority-note">
+                    <span className="explain-label">Priority &amp; recommended response</span>
+                    <p>
+                      <strong>{result.explanation.priority_reason}</strong>
+                      <br />
+                      {result.priority?.response}
+                    </p>
+                  </div>
+
+                  <div className="explain-section recommendation">
+                    <span className="explain-label">
+                      {isBlocked ? 'What you can do instead' : 'Recommendation'}
+                    </span>
+                    <p>{result.explanation.recommendation}</p>
+                  </div>
+                </div>
+              )}
 
               {/* Gauges Grid */}
               <div className="gauges-grid">
@@ -222,11 +296,6 @@ export default function InspectorTab({ onScanComplete }) {
                 </div>
               </div>
 
-              {/* Mitigation */}
-              <div className="mitigation-box">
-                <span className="box-subtitle">Policy Guidance & Mitigation</span>
-                <p>{result.mitigation_advice}</p>
-              </div>
             </div>
           )}
         </div>

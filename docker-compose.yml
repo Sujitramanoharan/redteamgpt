@@ -1,28 +1,41 @@
-version: '3.8'
-
+# Local and single-VM deployment. For Hugging Face Spaces the Dockerfile is
+# used directly and this file is ignored.
 services:
-  redteamgpt-firewall:
+  redteamgpt:
     build:
       context: .
       dockerfile: Dockerfile
     container_name: redteamgpt_firewall
     ports:
-      - "7860:7860"
+      - "${PORT:-7860}:7860"
     environment:
-      - PORT=7860
-      - LOG_LEVEL=info
-      - WORKERS=2
-    restart: always
+      ENVIRONMENT: production
+      PORT: 7860
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_JSON: "true"
+      REQUIRE_AUTH: ${REQUIRE_AUTH:-true}
+      API_KEYS: ${API_KEYS:?set API_KEYS in .env before starting}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5174}
+      RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-60}
+      DATABASE_PATH: /app/data/audit.db
+    volumes:
+      # Audit history must outlive the container.
+      - redteamgpt_data:/app/data
+    restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:7860/health"]
-      interval: 15s
+      test: ["CMD", "curl", "-fsS", "http://localhost:7860/health"]
+      interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 10s
-    resources:
-      limits:
-        cpus: '2.0'
-        memory: 2G
-      reservations:
-        cpus: '0.5'
-        memory: 512M
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2G
+        reservations:
+          cpus: "0.5"
+          memory: 1G
+
+volumes:
+  redteamgpt_data:

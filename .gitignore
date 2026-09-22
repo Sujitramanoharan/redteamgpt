@@ -7,3 +7,7 @@ models/
 .DS_Store
 
 *.db
+*.db-wal
+*.db-shm
+.pytest_cache/
+.cache/

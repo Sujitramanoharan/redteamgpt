@@ -5,7 +5,9 @@ Outputs metrics + a chart for the paper.
 import truststore
 truststore.inject_into_ssl()
 
+import json
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 sys.path.append(str(Path(__file__).parent))
 
@@ -90,7 +92,36 @@ def evaluate():
     print("Detection on reworded attacks :", round(evasion_detection, 3))
     print("Robustness drop               :", round(base_detection - evasion_detection, 3))
 
-    # --- 3. Chart ---
+    # --- 3. Persist metrics so the API serves measured numbers, not literals ---
+    metrics = {
+        "status": "OPERATIONAL",
+        "architecture": "DistilBERT fine-tuned (distilbert-base-uncased)",
+        "training_dataset": "Jailbreak-Classification + AdvBench + JailbreakBench + Alpaca",
+        "evaluated_at": datetime.now(timezone.utc).isoformat(),
+        "test_set_size": int(len(test_df)),
+        "metrics": {
+            "accuracy": round(float(accuracy_score(y_true, y_pred)), 4),
+            "precision": round(float(precision_score(y_true, y_pred)), 4),
+            "recall": round(float(recall_score(y_true, y_pred)), 4),
+            "f1_score": round(float(f1_score(y_true, y_pred)), 4),
+            "roc_auc": round(float(roc_auc_score(y_true, y_prob)), 4),
+            "false_positive_rate": round(float(fpr), 4),
+        },
+        "robustness": {
+            "detection_verbatim": round(float(base_detection), 4),
+            "detection_reworded": round(float(evasion_detection), 4),
+            "robustness_drop": round(float(base_detection - evasion_detection), 4),
+        },
+        "confusion_matrix": {
+            "true_negatives": int(tn), "false_positives": int(fp),
+            "false_negatives": int(fn), "true_positives": int(tp),
+        },
+    }
+    metrics_path = RESULTS / "metrics.json"
+    metrics_path.write_text(json.dumps(metrics, indent=2), encoding="utf-8")
+    print("\nMetrics written to:", metrics_path)
+
+    # --- 4. Chart ---
     fig, ax = plt.subplots(figsize=(6, 4))
     ax.bar(["Verbatim\nattacks", "Reworded\nattacks"],
            [base_detection, evasion_detection],

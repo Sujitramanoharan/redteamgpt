@@ -164,7 +164,7 @@ export default function TelemetryTab() {
                   const dateStr = l.timestamp ? new Date(l.timestamp).toLocaleTimeString() : '--';
                   const snippet = l.prompt ? (l.prompt.length > 55 ? l.prompt.substring(0, 55) + '...' : l.prompt) : '--';
                   return (
-                    <tr key={l.id || Math.random()}>
+                    <tr key={l.id ?? `${l.timestamp}-${l.risk_score}`}>
                       <td style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-muted)' }}>{l.id}</td>
                       <td style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{dateStr}</td>
                       <td>
