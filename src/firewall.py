@@ -15,6 +15,8 @@ import torch
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
 from config import settings
+from normalizer import describe as normalizer_describe
+from normalizer import normalize
 
 logger = logging.getLogger(__name__)
 
@@ -71,15 +73,47 @@ def _score_windows(text: str) -> tuple[float, int]:
 # Known threat signatures. Each carries a plain-English reason so the UI can tell a
 # non-technical user *why* a specific phrase was flagged, not just that it was.
 THREAT_PATTERNS = [
-    (r"(?i)\bignore (all )?(previous|prior) (instructions|rules|prompts)\b",
+    (r"(?i)\b(ignore|disregard|forget|discard|override|bypass)\s+"
+     r"(all\s+|any\s+|everything\s+)?"
+     r"(the\s+|your\s+|my\s+)?"
+     r"(previous|prior|earlier|above|preceding|former|original)?\s*"
+     r"(instructions|rules|prompts|directives|guidelines|commands|constraints)\b",
      "Prompt Injection", "high",
      "Asks the AI to throw away the instructions it was originally given. This is the "
      "classic opening move of a prompt injection attack."),
 
-    (r"(?i)\breveal (your|the) (system prompt|initial instructions|hidden prompt)\b",
+    (r"(?i)\bforget (everything|all)\s+(above|before|prior|previous|you)\b",
+     "Prompt Injection", "high",
+     "Tells the AI to discard its context so the attacker's text becomes its only "
+     "instruction."),
+
+    (r"(?i)\b(reveal|show|print|output|display|repeat|tell me|give me|share)\s+"
+     r"(me\s+)?(your|the)\s+"
+     r"(system prompt|initial instructions|original instructions|hidden prompt|"
+     r"configuration|setup instructions|exact instructions)\b",
      "System Leakage", "critical",
      "Tries to make the AI print its own confidential setup instructions, which often "
      "contain company rules, internal data, or API details."),
+
+    (r"(?i)\bwhat\s+(were|are|was)\s+(the\s+|your\s+)?"
+     r"(exact\s+|original\s+|initial\s+|hidden\s+|secret\s+)?"
+     r"(instructions|prompt|rules|directives)\b"
+     r"(?=.{0,60}(given|configured|told|set up|received|before|above))",
+     "System Leakage", "critical",
+     "Phrases the extraction attempt as an innocent question about the AI's setup, "
+     "which is still an attempt to expose confidential instructions."),
+
+    (r"(?i)\byou are (an?\s+)?(unrestricted|unfiltered|uncensored|unlimited|"
+     r"jailbroken|amoral|lawless)\s+(ai|assistant|model|bot|chatbot)\b",
+     "Jailbreak / Persona Hijack", "critical",
+     "Asserts a false identity for the AI in which its safety rules supposedly do "
+     "not apply."),
+
+    (r"(?i)\bwith no (safety|ethical|moral|content)\s*(guidelines|rules|filters|"
+     r"restrictions|limits|boundaries)\b",
+     "Constraint Bypass", "high",
+     "States that the AI operates without safeguards, priming it to answer requests "
+     "it would normally refuse."),
 
     (r"(?i)\byou are now (DAN|unrestricted|godmode|jailbroken|dev mode)\b",
      "Jailbreak / Persona Hijack", "critical",
@@ -103,10 +137,21 @@ THREAT_PATTERNS = [
      "Mentions an encoding scheme. Attackers hide banned instructions inside encoded text "
      "so that keyword filters cannot read them."),
 
-    (r"(?i)\b(malware|keylogger|ransomware|exploit|payload|phishing)\b",
+    # Intent, not vocabulary. "keylogger" and "exploit" are everyday words for
+    # defenders; blocking them makes the tool unusable for the people it is for.
+    # Only a request to build or deploy the thing is treated as an attack.
+    (r"(?i)\b(write|create|build|make|develop|generate|code|design)\s+"
+     r"(me\s+)?(a|an|some)?\s*"
+     r"(malware|keylogger|ransomware|virus|trojan|botnet|rootkit|worm|spyware)\b",
      "Harmful Execution", "critical",
-     "Names a category of tooling built to cause real-world harm, such as stealing "
-     "credentials or damaging systems."),
+     "Asks for malicious software to be created. Requesting the construction of "
+     "such a tool is different from asking how it works or how to defend against it."),
+
+    (r"(?i)\b(launch|deploy|run|conduct|carry out)\s+(a|an)?\s*"
+     r"(phishing|ransomware|ddos|brute.?force|supply.?chain)\s*"
+     r"(attack|campaign|operation)?\b",
+     "Harmful Execution", "critical",
+     "Asks for help carrying out an attack against real systems or people."),
 
     (r"(?i)\b(developer mode|sudo|admin mode|root access)\b",
      "Privilege Escalation", "high",
@@ -499,9 +544,37 @@ def detect(prompt: str) -> dict:
     malicious_prob, windows_used = _score_windows(p_clean)
     is_malicious = malicious_prob >= settings.decision_threshold
 
+    # Obfuscated text is scored in its canonical form too. The raw text is kept
+    # as the primary read so normalisation can only ever add signal.
+    normalized, techniques = normalize(p_clean)
+    scan_text = p_clean
+    if normalized != p_clean:
+        norm_prob, _ = _score_windows(normalized)
+        if norm_prob > malicious_prob:
+            malicious_prob = norm_prob
+            is_malicious = malicious_prob >= settings.decision_threshold
+        # Signatures are matched against the canonical form; that is the whole
+        # point of normalising.
+        scan_text = normalized
+
     # Secondary heuristic check to boost confidence on explicit jailbreaks
-    detected_tokens = _extract_threat_tokens(p_clean)
+    detected_tokens = _extract_threat_tokens(scan_text)
     has_critical = any(t["severity"] == "critical" for t in detected_tokens)
+
+    # Obfuscation is itself evidence: these techniques do not occur by accident,
+    # so a disguised keyword is treated as a deliberate evasion attempt.
+    if techniques and detected_tokens:
+        detected_tokens.insert(0, {
+            "text": techniques[0],
+            "category": "Filter Evasion",
+            "severity": "critical",
+            "explanation": normalizer_describe(techniques[0]),
+            "start": 0,
+            "end": 0,
+        })
+        has_critical = True
+        malicious_prob = max(malicious_prob, 0.85)
+        is_malicious = True
 
     # Decoded payloads are scanned as if they had been typed in plain text.
     decoded_payload = ""
