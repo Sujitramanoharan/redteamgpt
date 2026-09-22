@@ -50,7 +50,9 @@ class Settings(BaseSettings):
     # still works; only answer generation is unavailable.
     llm_provider: str = "none"
     llm_api_key: str = ""
-    llm_model: str = "gemini-2.0-flash"
+    # Floating alias rather than a pinned version: Google retires specific
+    # model ids, and a stale default breaks generation with a 404.
+    llm_model: str = "gemini-flash-latest"
     llm_history_turns: int = 6
     # Scan the model's reply too, not just the user's prompt.
     scan_output: bool = True

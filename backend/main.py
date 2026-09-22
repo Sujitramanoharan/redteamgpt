@@ -308,30 +308,30 @@ def chat(req: ChatRequest, request: Request,
             "llm_error": str(exc)[:200],
         }
 
-    # Output guardrail: a reply can be unsafe even when the prompt looked fine.
-    output_flag = None
+    # Output guardrail: a reply can leak or be harmful even when the prompt
+    # looked fine. Uses signature matching only - see firewall.scan_output.
+    output_check = None
     if settings.scan_output:
-        from firewall import detect
+        from firewall import scan_output
 
-        output_check = detect(answer)
+        output_check = scan_output(answer)
         if output_check["malicious"]:
-            logger.warning("Model output flagged: %s", output_check["category"])
+            logger.warning("Model output withheld: %s", output_check["category"])
             return {
                 "blocked": True,
                 "blocked_stage": "output",
-                "reply": "I generated a response, but it was flagged by the "
-                         "output filter and withheld. Please rephrase your question.",
+                "reply": "I generated a response, but it was withheld by the "
+                         "output filter. Please rephrase your question.",
                 "guardrail": guardrail,
                 "output_guardrail": output_check,
                 "provider": llm_client.provider_name(),
             }
-        output_flag = output_check["risk_score"]
 
     return {
         "blocked": False,
         "reply": answer,
         "guardrail": guardrail,
-        "output_risk_score": output_flag,
+        "output_guardrail": output_check,
         "provider": llm_client.provider_name(),
     }
 

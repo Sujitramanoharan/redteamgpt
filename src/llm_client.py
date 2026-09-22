@@ -9,6 +9,7 @@ With no key configured the app still runs and says so honestly rather than
 pretending to have answered.
 """
 import logging
+import time
 from typing import List, Optional
 
 import requests
@@ -25,10 +26,37 @@ SYSTEM_PROMPT = (
 )
 
 TIMEOUT = 45
+RETRY_STATUSES = {429, 500, 502, 503, 504}
+MAX_ATTEMPTS = 3
 
 
 class LLMError(RuntimeError):
     """Raised when the provider cannot be reached or returns an error."""
+
+
+def _post(url: str, headers: dict, payload: dict) -> requests.Response:
+    """POST with backoff on transient failures.
+
+    Free tiers return 503 under load often enough that a single attempt would
+    surface as a user-visible failure several times a day.
+    """
+    last = None
+    for attempt in range(MAX_ATTEMPTS):
+        try:
+            resp = requests.post(url, headers=headers, json=payload, timeout=TIMEOUT)
+        except requests.RequestException as exc:
+            last = LLMError(f"Network error reaching provider: {exc}")
+        else:
+            if resp.status_code not in RETRY_STATUSES:
+                return resp
+            last = LLMError(f"Provider returned {resp.status_code}: {resp.text[:160]}")
+            logger.warning("LLM attempt %d/%d failed: %s",
+                           attempt + 1, MAX_ATTEMPTS, last)
+
+        if attempt < MAX_ATTEMPTS - 1:
+            time.sleep(1.5 * (attempt + 1))
+
+    raise last
 
 
 def _gemini(message: str, history: List[dict]) -> str:
@@ -39,17 +67,16 @@ def _gemini(message: str, history: List[dict]) -> str:
     ]
     contents.append({"role": "user", "parts": [{"text": message}]})
 
-    resp = requests.post(
+    resp = _post(
         f"https://generativelanguage.googleapis.com/v1beta/models/"
         f"{settings.llm_model}:generateContent",
-        headers={"x-goog-api-key": settings.llm_api_key,
-                 "Content-Type": "application/json"},
-        json={
+        {"x-goog-api-key": settings.llm_api_key,
+         "Content-Type": "application/json"},
+        {
             "contents": contents,
             "systemInstruction": {"parts": [{"text": SYSTEM_PROMPT}]},
             "generationConfig": {"temperature": 0.7, "maxOutputTokens": 800},
         },
-        timeout=TIMEOUT,
     )
     if resp.status_code != 200:
         raise LLMError(f"Gemini returned {resp.status_code}: {resp.text[:200]}")
@@ -65,13 +92,12 @@ def _openai_compatible(message: str, history: List[dict], base_url: str) -> str:
     messages += [{"role": h["role"], "content": h["content"]} for h in history]
     messages.append({"role": "user", "content": message})
 
-    resp = requests.post(
+    resp = _post(
         f"{base_url}/chat/completions",
-        headers={"Authorization": f"Bearer {settings.llm_api_key}",
-                 "Content-Type": "application/json"},
-        json={"model": settings.llm_model, "messages": messages,
-              "temperature": 0.7, "max_tokens": 800},
-        timeout=TIMEOUT,
+        {"Authorization": f"Bearer {settings.llm_api_key}",
+         "Content-Type": "application/json"},
+        {"model": settings.llm_model, "messages": messages,
+         "temperature": 0.7, "max_tokens": 800},
     )
     if resp.status_code != 200:
         raise LLMError(f"Provider returned {resp.status_code}: {resp.text[:200]}")
@@ -82,14 +108,13 @@ def _anthropic(message: str, history: List[dict]) -> str:
     messages = [{"role": h["role"], "content": h["content"]} for h in history]
     messages.append({"role": "user", "content": message})
 
-    resp = requests.post(
+    resp = _post(
         "https://api.anthropic.com/v1/messages",
-        headers={"x-api-key": settings.llm_api_key,
-                 "anthropic-version": "2023-06-01",
-                 "Content-Type": "application/json"},
-        json={"model": settings.llm_model, "system": SYSTEM_PROMPT,
-              "messages": messages, "max_tokens": 800},
-        timeout=TIMEOUT,
+        {"x-api-key": settings.llm_api_key,
+         "anthropic-version": "2023-06-01",
+         "Content-Type": "application/json"},
+        {"model": settings.llm_model, "system": SYSTEM_PROMPT,
+         "messages": messages, "max_tokens": 800},
     )
     if resp.status_code != 200:
         raise LLMError(f"Anthropic returned {resp.status_code}: {resp.text[:200]}")

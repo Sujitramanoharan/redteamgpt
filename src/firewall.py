@@ -523,6 +523,32 @@ def detect(prompt: str) -> dict:
     }
 
 
+def scan_output(text: str) -> dict:
+    """Check an assistant reply for leakage or harmful signatures.
+
+    Deliberately does NOT use the classifier. That model was trained to tell
+    attack prompts from benign instructions, so an explanatory answer is out of
+    distribution and its score is meaningless - in practice it flagged ordinary
+    replies as malicious. Only the regex signatures transfer to output text,
+    and only the critical ones are worth blocking on.
+    """
+    t0 = time.perf_counter()
+    tokens = _extract_threat_tokens(text or "")
+    critical = [t for t in tokens if t["severity"] == "critical"]
+
+    return {
+        "malicious": bool(critical),
+        "verdict": "BLOCKED" if critical else "ALLOWED",
+        "category": critical[0]["category"] if critical else "Clean Response",
+        "detected_tokens": critical,
+        "reason": (
+            f"Response contained '{critical[0]['text']}', which matches a "
+            "high-severity pattern."
+        ) if critical else "No leakage or harmful signatures found in the response.",
+        "latency_ms": round((time.perf_counter() - t0) * 1000, 2),
+    }
+
+
 def run_evasion_test(prompt: str) -> dict:
     """Evaluate guardrail resiliency against common adversarial transformations."""
     b64_encoded = base64.b64encode(prompt.encode("utf-8")).decode("utf-8")
