@@ -329,23 +329,30 @@ def _confidence_wording(prob: float, is_malicious: bool) -> str:
     return "not fully certain"
 
 
+_SEVERITY_ORDER = {"critical": 0, "high": 1, "medium": 2}
+
+
 def _build_explanation(prompt: str, category: str, is_malicious: bool,
                        malicious_prob: float, risk_score: int,
                        detected_tokens: list, priority: dict,
-                       heuristic_override: bool) -> dict:
+                       heuristic_override: bool,
+                       decoded_payload: str = "") -> dict:
     """Produce a human-readable justification for the verdict."""
     knowledge = ATTACK_KNOWLEDGE.get(category, ATTACK_KNOWLEDGE["Prompt Injection / Policy Violation"])
     certainty = _confidence_wording(malicious_prob, is_malicious)
     borderline = " This is a borderline case, so a human should confirm the decision." \
         if certainty == "not fully certain" else ""
 
+    # Strongest signal first: a decoded payload explains the block far better
+    # than an incidental keyword that happened to match alongside it.
     evidence = [
         {
             "phrase": t["text"],
             "severity": t["severity"],
             "reason": t.get("explanation", "Matches a known attack signature."),
         }
-        for t in detected_tokens
+        for t in sorted(detected_tokens,
+                        key=lambda t: _SEVERITY_ORDER.get(t["severity"], 3))
     ]
 
     if is_malicious:
@@ -361,6 +368,29 @@ def _build_explanation(prompt: str, category: str, is_malicious: bool,
                 "No single phrase gave it away. The detector recognised the overall shape and "
                 "phrasing of the request as matching attack prompts it was trained on."
             )
+
+        if decoded_payload:
+            # The classifier reads the surface text, which looks innocent here;
+            # claiming it produced this score would be untrue.
+            how_we_know = (
+                "The encoded text in this prompt was decoded before judging it. "
+                f"The hidden instruction reads: \"{decoded_payload[:140]}\" - which "
+                "is a known attack. The visible wording on its own did not look "
+                f"dangerous, which is exactly what the encoding was meant to achieve. "
+                f"Final risk: {risk_score} out of 100."
+            )
+            return {
+                "headline": headline,
+                "attack_name": knowledge["plain_name"],
+                "what_it_means": knowledge["what_it_means"],
+                "why_risky": knowledge["why_risky"],
+                "how_we_know": how_we_know,
+                "trigger_summary": "Concealed instruction recovered by decoding.",
+                "evidence": evidence,
+                "recommendation": knowledge["safe_alternative"],
+                "priority_reason": f"Priority {priority['level']} ({priority['label']}) "
+                                   f"- {priority['meaning']}",
+            }
 
         how_we_know = (
             f"The detection model scored this {risk_score} out of 100 for risk and is {certainty} "
@@ -474,6 +504,7 @@ def detect(prompt: str) -> dict:
     has_critical = any(t["severity"] == "critical" for t in detected_tokens)
 
     # Decoded payloads are scanned as if they had been typed in plain text.
+    decoded_payload = ""
     for decoded in _decode_hidden_payloads(p_clean):
         hidden_tokens = _extract_threat_tokens(decoded)
         hidden_prob, _ = _score_windows(decoded)
@@ -493,6 +524,7 @@ def detect(prompt: str) -> dict:
             malicious_prob = max(malicious_prob, hidden_prob, 0.9)
             is_malicious = True
             has_critical = True
+            decoded_payload = decoded_payload or decoded
 
     # A single "high" hit can be innocent ("how do I disable security warnings?"),
     # but two independent high-severity categories co-occurring is corroboration.
@@ -547,7 +579,7 @@ def detect(prompt: str) -> dict:
     priority = _compute_priority(risk_score, detected_tokens, is_malicious)
     explanation = _build_explanation(
         p_clean, category, is_malicious, malicious_prob, risk_score,
-        detected_tokens, priority, heuristic_override,
+        detected_tokens, priority, heuristic_override, decoded_payload,
     )
     mitigation_advice = explanation["recommendation"]
 
