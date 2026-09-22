@@ -227,6 +227,128 @@ def openai_proxy(req: OpenAIChatCompletionRequest, request: Request,
     }
 
 
+# --- Conversational assistant --------------------------------------------
+class ChatTurn(BaseModel):
+    role: str
+    content: str
+
+
+class ChatRequest(BaseModel):
+    message: str = Field(..., max_length=settings.max_prompt_chars)
+    history: List[ChatTurn] = Field(default_factory=list)
+
+
+def _refusal_message(result: dict) -> str:
+    """Compose a conversational refusal from the firewall's explanation.
+
+    A bare "BLOCKED" teaches the user nothing, so the assistant explains what
+    it saw and how to ask legitimately instead.
+    """
+    e = result["explanation"]
+    parts = [
+        f"I can't help with that one. {e['what_it_means']}",
+        f"**Why this is blocked:** {e['why_risky']}" if e["why_risky"] else "",
+    ]
+    if e["evidence"]:
+        phrases = ", ".join(f'"{ev["phrase"]}"' for ev in e["evidence"][:3])
+        parts.append(f"**What triggered it:** {phrases}")
+    parts.append(f"**What you can do instead:** {e['recommendation']}")
+    return "\n\n".join(p for p in parts if p)
+
+
+@app.post("/api/chat", tags=["assistant"])
+def chat(req: ChatRequest, request: Request,
+         client_id: str = Depends(require_api_key)):
+    """Answer a user message, refusing with an explanation when unsafe.
+
+    This is the end-user surface: the firewall runs first, and only safe
+    prompts reach the language model.
+    """
+    import llm_client
+
+    if not req.message.strip():
+        raise HTTPException(status_code=400, detail="Message is empty.")
+
+    guardrail = _scan(req.message, client_id, request)
+
+    if guardrail["malicious"]:
+        return {
+            "blocked": True,
+            "reply": _refusal_message(guardrail),
+            "guardrail": guardrail,
+            "provider": llm_client.provider_name(),
+        }
+
+    if not llm_client.is_configured():
+        return {
+            "blocked": False,
+            "reply": (
+                "Your message passed the security check, but no language model is "
+                "connected yet, so I can't answer it.\n\n"
+                "Set `LLM_PROVIDER` and `LLM_API_KEY` in your `.env` to enable "
+                "answers. The firewall works either way."
+            ),
+            "guardrail": guardrail,
+            "provider": "none",
+            "llm_unavailable": True,
+        }
+
+    try:
+        answer = llm_client.generate(
+            req.message, [t.model_dump() for t in req.history]
+        )
+    except llm_client.LLMError as exc:
+        logger.warning("LLM generation failed: %s", exc)
+        return {
+            "blocked": False,
+            "reply": "Your message passed the security check, but the language "
+                     "model could not be reached. Please try again.",
+            "guardrail": guardrail,
+            "provider": llm_client.provider_name(),
+            "llm_error": str(exc)[:200],
+        }
+
+    # Output guardrail: a reply can be unsafe even when the prompt looked fine.
+    output_flag = None
+    if settings.scan_output:
+        from firewall import detect
+
+        output_check = detect(answer)
+        if output_check["malicious"]:
+            logger.warning("Model output flagged: %s", output_check["category"])
+            return {
+                "blocked": True,
+                "blocked_stage": "output",
+                "reply": "I generated a response, but it was flagged by the "
+                         "output filter and withheld. Please rephrase your question.",
+                "guardrail": guardrail,
+                "output_guardrail": output_check,
+                "provider": llm_client.provider_name(),
+            }
+        output_flag = output_check["risk_score"]
+
+    return {
+        "blocked": False,
+        "reply": answer,
+        "guardrail": guardrail,
+        "output_risk_score": output_flag,
+        "provider": llm_client.provider_name(),
+    }
+
+
+@app.get("/api/chat/status", tags=["assistant"])
+def chat_status():
+    """Lets the UI show whether answering is available before the first message."""
+    import llm_client
+
+    return {
+        "configured": llm_client.is_configured(),
+        "provider": llm_client.provider_name(),
+        "model": settings.llm_model if llm_client.is_configured() else None,
+        "output_scanning": settings.scan_output,
+    }
+
+
 # --- Telemetry ------------------------------------------------------------
 @app.get("/api/logs", tags=["telemetry"])
 def get_logs(

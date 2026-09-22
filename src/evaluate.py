@@ -28,6 +28,24 @@ RESULTS = ROOT / "results"
 RESULTS.mkdir(exist_ok=True)
 
 
+def _describe_model():
+    """Report the backbone actually evaluated, not a hardcoded guess."""
+    from config import settings
+
+    summary = settings.model_dir / "training_summary.json"
+    if summary.exists():
+        base = json.loads(summary.read_text(encoding="utf-8")).get("base_model")
+        if base:
+            return f"Fine-tuned {base}"
+
+    cfg = settings.model_dir / "config.json"
+    if cfg.exists():
+        data = json.loads(cfg.read_text(encoding="utf-8"))
+        arch = (data.get("architectures") or ["unknown"])[0]
+        return f"Fine-tuned {arch} ({data.get('model_type', 'unknown')})"
+    return "Unknown architecture"
+
+
 def simple_paraphrase(text):
     """Create a reworded/evasive version of an attack (no API needed)."""
     prefixes = [
@@ -95,7 +113,7 @@ def evaluate():
     # --- 3. Persist metrics so the API serves measured numbers, not literals ---
     metrics = {
         "status": "OPERATIONAL",
-        "architecture": "DistilBERT fine-tuned (distilbert-base-uncased)",
+        "architecture": _describe_model(),
         "training_dataset": "Jailbreak-Classification + AdvBench + JailbreakBench + Alpaca",
         "evaluated_at": datetime.now(timezone.utc).isoformat(),
         "test_set_size": int(len(test_df)),

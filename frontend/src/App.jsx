@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Shield, ShieldAlert, Cpu, Terminal, Layers } from 'lucide-react';
+import { Shield, ShieldAlert, Cpu, Terminal, Layers, MessageSquare } from 'lucide-react';
+import ChatTab from './components/ChatTab';
 import InspectorTab from './components/InspectorTab';
 import EvasionTab from './components/EvasionTab';
 import TelemetryTab from './components/TelemetryTab';
@@ -7,7 +8,7 @@ import ApiHubTab from './components/ApiHubTab';
 import ModelSpecsTab from './components/ModelSpecsTab';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState('inspector');
+  const [activeTab, setActiveTab] = useState('chat');
 
   return (
     <div className="app-wrapper">
@@ -26,6 +27,12 @@ export default function App() {
         </div>
 
         <nav className="nav-tabs">
+          <button
+            className={`nav-tab ${activeTab === 'chat' ? 'active' : ''}`}
+            onClick={() => setActiveTab('chat')}
+          >
+            <MessageSquare size={15} /> Assistant
+          </button>
           <button
             className={`nav-tab ${activeTab === 'inspector' ? 'active' : ''}`}
             onClick={() => setActiveTab('inspector')}
@@ -66,6 +73,7 @@ export default function App() {
 
       {/* Main Content Pane */}
       <main className="main-content">
+        {activeTab === 'chat' && <ChatTab />}
         {activeTab === 'inspector' && <InspectorTab />}
         {activeTab === 'evasion' && <EvasionTab />}
         {activeTab === 'telemetry' && <TelemetryTab />}

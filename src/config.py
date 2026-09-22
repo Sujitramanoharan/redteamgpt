@@ -45,6 +45,16 @@ class Settings(BaseSettings):
     chunk_stride: int = 64
     decision_threshold: float = 0.5
 
+    # --- Assistant LLM ----------------------------------------------------
+    # gemini | groq | openai | anthropic | none. Without a key the firewall
+    # still works; only answer generation is unavailable.
+    llm_provider: str = "none"
+    llm_api_key: str = ""
+    llm_model: str = "gemini-2.0-flash"
+    llm_history_turns: int = 6
+    # Scan the model's reply too, not just the user's prompt.
+    scan_output: bool = True
+
     # --- Storage ----------------------------------------------------------
     # sqlite:// for free tier, postgresql:// later. Empty disables persistence.
     database_path: Path = ROOT / "data" / "audit.db"
