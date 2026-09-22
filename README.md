@@ -1,3 +1,13 @@
+---
+title: RedTeamGPT
+emoji: 🛡️
+colorFrom: red
+colorTo: gray
+sdk: docker
+app_port: 7860
+pinned: false
+---
+
 # RedTeamGPT
 
 A production-grade **prompt-injection firewall** for LLM applications. It sits between your

@@ -1,8 +1,24 @@
+.git/
+.github/
 venv/
 __pycache__/
 *.pyc
-.git/
+.pytest_cache/
 .env
 *.db
+*.db-wal
+*.db-shm
 .DS_Store
+.vscode/
+
+# Weights are pulled from the Hub via MODEL_HUB_ID, not baked into the image.
 models/
+
+# node_modules is reinstalled inside the build stage; shipping it would add
+# hundreds of MB to the build context and stall the image build.
+frontend/node_modules/
+frontend/dist/
+
+# Training data and notebooks are not needed at runtime.
+data/
+tests/
