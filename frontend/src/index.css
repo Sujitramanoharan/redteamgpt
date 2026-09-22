@@ -92,6 +92,17 @@ body {
 
 .status-indicator-badge { flex-shrink: 0; }
 
+/* Below roughly a laptop width the seven tabs need the room more than the
+   tagline and the status pill's label do. */
+@media (max-width: 1500px) {
+  .brand-text .logo-subtitle { display: none; }
+}
+
+@media (max-width: 1350px) {
+  .status-indicator-badge .status-text { display: none; }
+  .top-nav { padding-inline: 14px; }
+}
+
 .logo-shield {
   width: 42px;
   height: 42px;
