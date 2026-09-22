@@ -103,10 +103,13 @@ def normalize(text: str) -> tuple[str, list[str]]:
 
     # 7. Leetspeak. Applied only to words mixing letters and digits, so
     #    ordinary numbers ("I have 3 cats", "port 8080") are left alone.
+    #    Capped at 15 characters: base64 blobs, hashes and API keys also mix
+    #    letters and digits, and substituting inside them corrupts data that
+    #    later stages need to decode.
     def _deleet(match: re.Match) -> str:
         return match.group(0).translate(_LEET)
 
-    deleeted = re.sub(r"\b(?=[A-Za-z]*[0-9@$])(?=[0-9@$]*[A-Za-z])[A-Za-z0-9@$]{3,}\b",
+    deleeted = re.sub(r"\b(?=[A-Za-z]*[0-9@$])(?=[0-9@$]*[A-Za-z])[A-Za-z0-9@$]{3,15}\b",
                       _deleet, result)
     if deleeted != result:
         techniques.append("Leetspeak substitutions")

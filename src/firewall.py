@@ -578,7 +578,10 @@ def detect(prompt: str) -> dict:
 
     # Decoded payloads are scanned as if they had been typed in plain text.
     decoded_payload = ""
-    for decoded in _decode_hidden_payloads(p_clean):
+    payloads = _decode_hidden_payloads(p_clean)
+    benign_payload_scores: list[float] = []
+
+    for decoded in payloads:
         hidden_tokens = _extract_threat_tokens(decoded)
         hidden_prob, _ = _score_windows(decoded)
         if hidden_tokens or hidden_prob >= settings.decision_threshold:
@@ -598,6 +601,21 @@ def detect(prompt: str) -> dict:
             is_malicious = True
             has_critical = True
             decoded_payload = decoded_payload or decoded
+        else:
+            benign_payload_scores.append(hidden_prob)
+
+    # Decoding cuts both ways. The classifier treats the mere presence of an
+    # encoded blob as suspicious, because in training data encoded strings
+    # nearly always belong to attacks. Once the blob is decoded and turns out
+    # to be harmless, that suspicion has been answered. Only applied when the
+    # prompt is also benign with the blob removed, so an attacker cannot lower
+    # their score by attaching innocent base64 to a real attack.
+    if payloads and not decoded_payload and len(benign_payload_scores) == len(payloads):
+        without_blobs = _B64_RE.sub(" ", p_clean).strip()
+        remainder_prob, _ = _score_windows(without_blobs) if without_blobs else (0.0, 0)
+        if remainder_prob < settings.decision_threshold:
+            malicious_prob = max([remainder_prob] + benign_payload_scores)
+            is_malicious = malicious_prob >= settings.decision_threshold
 
     # A single "high" hit can be innocent ("how do I disable security warnings?"),
     # but two independent high-severity categories co-occurring is corroboration.

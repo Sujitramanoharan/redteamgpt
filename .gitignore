@@ -11,3 +11,4 @@ models/
 *.db-shm
 .pytest_cache/
 .cache/
+*.bak
