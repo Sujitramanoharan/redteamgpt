@@ -1,26 +1,26 @@
 {
   "status": "OPERATIONAL",
-  "architecture": "Fine-tuned DistilBertForSequenceClassification (distilbert)",
+  "architecture": "Fine-tuned distilbert-base-uncased",
   "training_dataset": "Jailbreak-Classification + AdvBench + JailbreakBench + Alpaca",
-  "evaluated_at": "2026-09-22T17:12:43.239799+00:00",
-  "test_set_size": 455,
+  "evaluated_at": "2026-09-23T06:55:23.647853+00:00",
+  "test_set_size": 473,
   "metrics": {
-    "accuracy": 0.9824,
-    "precision": 0.9865,
-    "recall": 0.9778,
-    "f1_score": 0.9821,
-    "roc_auc": 0.9951,
-    "false_positive_rate": 0.013
+    "accuracy": 0.9852,
+    "precision": 0.9786,
+    "recall": 0.9913,
+    "f1_score": 0.9849,
+    "roc_auc": 0.9986,
+    "false_positive_rate": 0.0207
   },
   "robustness": {
-    "detection_verbatim": 0.9778,
-    "detection_reworded": 0.96,
-    "robustness_drop": 0.0178
+    "detection_verbatim": 0.9913,
+    "detection_reworded": 0.9351,
+    "robustness_drop": 0.0563
   },
   "confusion_matrix": {
-    "true_negatives": 227,
-    "false_positives": 3,
-    "false_negatives": 5,
-    "true_positives": 220
+    "true_negatives": 237,
+    "false_positives": 5,
+    "false_negatives": 2,
+    "true_positives": 229
   }
 }
