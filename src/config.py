@@ -45,6 +45,10 @@ class Settings(BaseSettings):
     max_sequence_length: int = 256
     chunk_stride: int = 64
     decision_threshold: float = 0.5
+    # Intra-op threads per inference. 0 means half the cores. Under concurrent
+    # load a lower value usually wins, because requests already run in
+    # parallel and per-inference threads then compete for the same cores.
+    torch_threads: int = 0
 
     # --- Assistant LLM ----------------------------------------------------
     # gemini | groq | openai | anthropic | none. Without a key the firewall

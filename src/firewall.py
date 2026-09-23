@@ -38,7 +38,11 @@ MODEL_SOURCE = _resolve_model_source()
 _tokenizer = AutoTokenizer.from_pretrained(MODEL_SOURCE)
 _model = AutoModelForSequenceClassification.from_pretrained(MODEL_SOURCE)
 _model.eval()
-torch.set_num_threads(max(1, (os.cpu_count() or 2) // 2))
+# Intra-op threads per inference. FastAPI already runs sync endpoints in a
+# threadpool, so under concurrent load several inferences run at once; giving
+# each one several threads oversubscribes the cores and they fight. Measured
+# on this 8-core box: see results/loadtest.json.
+torch.set_num_threads(settings.torch_threads or max(1, (os.cpu_count() or 2) // 2))
 
 MAX_LEN = settings.max_sequence_length
 STRIDE = settings.chunk_stride
