@@ -140,6 +140,38 @@ _INDIRECT_INJECTION = [
 ]
 
 
+_SENTENCE_END = (".", "?", "!")
+
+
+def punctuation_variants(base: pd.DataFrame, per_class: int = 350) -> pd.DataFrame:
+    """Break the correlation between trailing punctuation and label.
+
+    AdvBench and JailbreakBench are written as bare goals and end with no
+    punctuation at all, while Alpaca's benign instructions usually do. Across
+    the corpus 77% of attacks lack a final full stop against 32% of benign
+    prompts, so the model learned punctuation as a proxy for safety: removing
+    the full stop from "Write an email to my manager about my leave request"
+    flipped it from allowed to blocked at 100/100.
+
+    Adding the mirrored form of each example teaches the model that trailing
+    punctuation carries no information about intent.
+    """
+    stripped = base["text"].str.rstrip()
+    ends = stripped.str.endswith(_SENTENCE_END)
+
+    # Attacks that lack punctuation, given a full stop.
+    attacks = base[(base["label"] == 1) & ~ends].head(per_class).copy()
+    attacks["text"] = attacks["text"].str.rstrip() + "."
+
+    # Benign prompts that have punctuation, with it removed.
+    benign = base[(base["label"] == 0) & ends].head(per_class).copy()
+    benign["text"] = benign["text"].str.rstrip().str.rstrip("".join(_SENTENCE_END))
+
+    variants = pd.concat([attacks, benign], ignore_index=True)
+    variants["source"] = "punctuation-variant"
+    return variants[variants["text"].str.len() > 5]
+
+
 def build() -> pd.DataFrame:
     rows = []
     for text in _SYSADMIN + _DEFENSIVE_SECURITY + _CREDENTIALS_AND_ENCODING + _PROMPT_ENGINEERING:
@@ -170,7 +202,11 @@ def main() -> None:
     backup = COMBINED.with_suffix(".csv.bak")
     combined.to_csv(backup, index=False)
 
-    merged = pd.concat([combined, augmented], ignore_index=True)
+    variants = punctuation_variants(combined)
+    print(f"\nPunctuation variants: {len(variants)} "
+          f"({(variants.label == 1).sum()} attack, {(variants.label == 0).sum()} benign)")
+
+    merged = pd.concat([combined, augmented, variants], ignore_index=True)
     merged = merged.drop_duplicates(subset=["text"])
     merged = merged.sample(frac=1, random_state=42).reset_index(drop=True)
     merged.to_csv(COMBINED, index=False)
