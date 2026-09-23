@@ -523,6 +523,7 @@ def detect(prompt: str) -> dict:
             "risk_level": "SAFE",
             "category": "Benign Query",
             "action": "ALLOW",
+            "escalated_by_rules": False,
             "priority": dict(PRIORITY_TIERS["P4"]),
             "explanation": {
                 "headline": "Nothing to analyse — the prompt was empty.",
@@ -684,6 +685,13 @@ def detect(prompt: str) -> dict:
         "risk_level": risk_level,
         "category": category,
         "action": action,
+        # True when the rule layer overruled the classifier. The two detectors
+        # disagreeing is the most honest signal that a case is genuinely
+        # uncertain, and this model is otherwise badly calibrated - it scores
+        # almost everything near 0 or near 1, so a confidence band alone
+        # surfaces very little.
+        "escalated_by_rules": bool(heuristic_override or decoded_payload or
+                                   (techniques and detected_tokens)),
         "priority": priority,
         "explanation": explanation,
         "latency_ms": latency_ms,

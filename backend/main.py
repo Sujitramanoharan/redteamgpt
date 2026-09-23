@@ -35,6 +35,7 @@ from security import (
     limiter,
     require_api_key,
 )
+from review import store as review_store
 from storage import store
 
 configure_logging()
@@ -128,13 +129,23 @@ class OpenAIChatCompletionRequest(BaseModel):
 
 
 def _scan(prompt: str, client_id: str, request: Request) -> dict:
-    """Run the firewall and persist the outcome."""
+    """Run the firewall, persist the outcome, and queue it if borderline."""
     from firewall import detect
 
     result = detect(prompt)
     record_scan(result)
     store.record(result, client_id=client_id,
                  request_id=request.headers.get("x-request-id"))
+
+    if settings.review_enabled:
+        probability = result.get("malicious_probability", 0.0)
+        if result.get("escalated_by_rules"):
+            review_store.enqueue(result, "disagreement")
+        elif settings.review_band_low <= probability <= settings.review_band_high:
+            review_store.enqueue(result, "uncertain")
+        elif (result.get("priority") or {}).get("level") == "P3":
+            review_store.enqueue(result, "flagged")
+
     return result
 
 
@@ -226,6 +237,112 @@ def openai_proxy(req: OpenAIChatCompletionRequest, request: Request,
         },
         "guardrail_telemetry": result,
     }
+
+
+# --- Human review ---------------------------------------------------------
+class ReviewDecision(BaseModel):
+    true_label: int = Field(..., ge=0, le=1,
+                            description="0 = benign, 1 = malicious")
+    note: str = Field(default="", max_length=1000)
+
+
+class ReportRequest(BaseModel):
+    prompt: str = Field(..., max_length=settings.max_prompt_chars)
+
+
+@app.get("/api/review/queue", tags=["review"])
+def review_queue(
+    status: str = Query("pending", pattern="^(pending|reviewed)$"),
+    limit: int = Query(50, ge=1, le=200),
+    client_id: str = Depends(require_api_key),
+):
+    """Decisions awaiting human confirmation, or already confirmed."""
+    items = (review_store.pending(limit) if status == "pending"
+             else review_store.reviewed(limit))
+    return {"status": status, "count": len(items), "items": items}
+
+
+@app.post("/api/review/report", tags=["review"])
+def report_decision(req: ReportRequest, request: Request,
+                    client_id: str = Depends(require_api_key)):
+    """Let a user dispute a verdict, putting it in front of a reviewer."""
+    from firewall import detect
+
+    result = detect(req.prompt)
+    queued = review_store.enqueue(result, "reported")
+    return {
+        "status": "queued" if queued else "already_queued",
+        "verdict": result["verdict"],
+    }
+
+
+@app.get("/api/review/stats", tags=["review"])
+def review_stats(client_id: str = Depends(require_api_key)):
+    """How often the firewall is right, measured against human judgement."""
+    return review_store.stats()
+
+
+@app.post("/api/review/export", tags=["review"])
+def export_review_data(client_id: str = Depends(require_api_key)):
+    """Export confirmed decisions as labelled training rows.
+
+    This is the loop: what reviewers decide becomes what the model learns.
+    Exported rows are marked so the same correction is not counted twice.
+    """
+    rows = review_store.export_training_rows(mark=True)
+    if not rows:
+        return {"exported": 0, "message": "Nothing new to export.",
+                "path": None}
+
+    out = ROOT / "data" / "review_feedback.csv"
+    existing = pd_read_csv_safe(out)
+    frame = pd_concat_rows(existing, rows)
+    frame.to_csv(out, index=False)
+
+    return {
+        "exported": len(rows),
+        "total_rows": len(frame),
+        "path": str(out),
+        "next_step": "python src/train_detector.py --output models/detector-next",
+    }
+
+
+# Declared after the literal /api/review/* routes: FastAPI matches in
+# declaration order, so a path parameter here would swallow "export" and
+# "report" and try to parse them as ids.
+@app.post("/api/review/{item_id}", tags=["review"])
+def submit_review(item_id: int, decision: ReviewDecision,
+                  client_id: str = Depends(require_api_key)):
+    """Record whether the firewall was right. This becomes training data."""
+    item = review_store.submit(item_id, decision.true_label, decision.note)
+    if item is None:
+        raise HTTPException(status_code=404,
+                            detail="No pending review with that id.")
+
+    agreed = item["true_label"] == item["predicted_label"]
+    logger.info("Review %s: firewall was %s", item_id,
+                "correct" if agreed else "wrong")
+    return {"status": "recorded", "firewall_was_correct": agreed, "item": item}
+
+
+def pd_read_csv_safe(path: Path):
+    import pandas as pd
+
+    if path.exists():
+        try:
+            return pd.read_csv(path)
+        except Exception:
+            logger.warning("Could not read %s; starting fresh", path)
+    return None
+
+
+def pd_concat_rows(existing, rows: list[dict]):
+    import pandas as pd
+
+    frame = pd.DataFrame(rows)
+    if existing is not None and not existing.empty:
+        frame = pd.concat([existing, frame], ignore_index=True)
+    return frame.drop_duplicates(subset=["text"], keep="last")
 
 
 # --- Document scanning ----------------------------------------------------

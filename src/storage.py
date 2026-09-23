@@ -51,6 +51,10 @@ class AuditStore:
         # WAL lets readers and writers work concurrently across worker processes.
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA synchronous=NORMAL")
+        # Without this a second writer fails instantly with "database is
+        # locked" instead of waiting its turn. The review store holds its own
+        # connection to this same file.
+        self._conn.execute("PRAGMA busy_timeout=5000")
         self._conn.executescript(_SCHEMA)
         self._conn.commit()
         logger.info("Audit store ready at %s", db_path)

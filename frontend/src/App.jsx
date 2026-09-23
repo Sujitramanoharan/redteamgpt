@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { Shield, ShieldAlert, Cpu, Terminal, Layers, MessageSquare, FileSearch } from 'lucide-react';
+import { Shield, ShieldAlert, Cpu, Terminal, Layers, MessageSquare, FileSearch, ClipboardCheck } from 'lucide-react';
 import ChatTab from './components/ChatTab';
 import DocumentTab from './components/DocumentTab';
+import ReviewTab from './components/ReviewTab';
 import InspectorTab from './components/InspectorTab';
 import EvasionTab from './components/EvasionTab';
 import TelemetryTab from './components/TelemetryTab';
@@ -47,6 +48,12 @@ export default function App() {
             <FileSearch size={15} /> Document Scan
           </button>
           <button
+            className={`nav-tab ${activeTab === 'review' ? 'active' : ''}`}
+            onClick={() => setActiveTab('review')}
+          >
+            <ClipboardCheck size={15} /> Review
+          </button>
+          <button
             className={`nav-tab ${activeTab === 'evasion' ? 'active' : ''}`}
             onClick={() => setActiveTab('evasion')}
           >
@@ -83,6 +90,7 @@ export default function App() {
         {activeTab === 'chat' && <ChatTab />}
         {activeTab === 'inspector' && <InspectorTab />}
         {activeTab === 'document' && <DocumentTab />}
+        {activeTab === 'review' && <ReviewTab />}
         {activeTab === 'evasion' && <EvasionTab />}
         {activeTab === 'telemetry' && <TelemetryTab />}
         {activeTab === 'apiHub' && <ApiHubTab />}

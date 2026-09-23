@@ -58,6 +58,14 @@ class Settings(BaseSettings):
     # Scan the model's reply too, not just the user's prompt.
     scan_output: bool = True
 
+    # --- Human review -----------------------------------------------------
+    # Decisions inside this probability band are where the model is least
+    # reliable, so they are queued for a person to confirm.
+    review_enabled: bool = True
+    review_band_low: float = 0.25
+    review_band_high: float = 0.75
+    review_queue_max: int = 500
+
     # --- Storage ----------------------------------------------------------
     # sqlite:// for free tier, postgresql:// later. Empty disables persistence.
     database_path: Path = ROOT / "data" / "audit.db"
