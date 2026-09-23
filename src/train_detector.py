@@ -107,7 +107,11 @@ def main():
         weight_decay=0.01,
         logging_steps=50,
         eval_strategy="epoch",
-        save_strategy="no",
+        # Checkpoint every epoch. A four-hour CPU run was lost once because
+        # weights were only written after the final step; a crash or a closed
+        # session at 99% left nothing behind.
+        save_strategy="epoch",
+        save_total_limit=1,
         report_to="none",
     )
 
