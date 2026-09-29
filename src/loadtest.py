@@ -5,8 +5,11 @@ behaviour past one request at a time was unknown. Model inference is CPU-bound
 and blocking, which means throughput should plateau near the core count and
 latency should grow linearly beyond it. This finds where that knee is.
 
-    python src/loadtest.py --url http://127.0.0.1:7861
-    python src/loadtest.py --levels 1,2,4,8,16,32 --duration 12
+    python src/loadtest.py --url http://127.0.0.1:7861 --api-key rtg_live_...
+    python src/loadtest.py --levels 1,2,4,8,16,32 --duration 12 --api-key $KEY
+
+Every scan is now authenticated and written to the audit log and usage
+counters, so these numbers include that database work - as production does.
 
 Rate limiting will reject most of a load test at default settings, so 429s are
 counted separately rather than reported as failures. For a true capacity
@@ -49,13 +52,14 @@ async def _worker(client, url, deadline, results, counter):
             results.append((0, time.perf_counter() - start))
 
 
-async def run_level(url: str, concurrency: int, duration: float) -> dict:
+async def run_level(url: str, concurrency: int, duration: float, api_key: str) -> dict:
     results: list[tuple[int, float]] = []
     counter = [0]
     limits = httpx.Limits(max_connections=concurrency + 10,
                           max_keepalive_connections=concurrency + 10)
 
-    async with httpx.AsyncClient(timeout=120.0, limits=limits) as client:
+    async with httpx.AsyncClient(timeout=120.0, limits=limits,
+                                 headers={"X-API-Key": api_key}) as client:
         await client.post(f"{url}/api/check", json={"prompt": "warmup"})
         started = time.perf_counter()
         deadline = started + duration
@@ -111,7 +115,7 @@ async def main_async(args) -> int:
 
     report = []
     for level in levels:
-        row = await run_level(args.url, level, args.duration)
+        row = await run_level(args.url, level, args.duration, args.api_key)
         report.append(row)
         print(f"{row['concurrency']:>5} {row['rps']:>8} {row['p50_ms']:>9} "
               f"{row['p95_ms']:>9} {row['p99_ms']:>9} {row['max_ms']:>9} "
@@ -139,6 +143,8 @@ def main() -> int:
     parser.add_argument("--levels", default="1,2,4,8,16,32")
     parser.add_argument("--duration", type=float, default=10.0)
     parser.add_argument("--save", action="store_true")
+    parser.add_argument("--api-key", required=True,
+                        help="an API key from Settings -> API keys")
     return asyncio.run(main_async(parser.parse_args()))
 
 
