@@ -76,13 +76,17 @@ def main():
     p.add_argument("--batch-size", type=int, default=8)
     p.add_argument("--lr", type=float, default=2e-5)
     p.add_argument("--max-length", type=int, default=256)
+    p.add_argument("--data", default=str(DATA),
+                   help="training CSV (text,label[,source])")
+    p.add_argument("--resume", action="store_true",
+                   help="continue from the latest checkpoint in <output>/checkpoints")
     args = p.parse_args()
 
     out_dir = Path(args.output)
     out_dir.mkdir(parents=True, exist_ok=True)
     torch.set_num_threads(max(1, (os.cpu_count() or 4)))
 
-    df = pd.read_csv(DATA).dropna(subset=["text"])
+    df = pd.read_csv(args.data).dropna(subset=["text"])
     df["label"] = df["label"].astype(int)
     train_df, test_df = train_test_split(
         df, test_size=0.2, random_state=42, stratify=df["label"]
@@ -125,7 +129,7 @@ def main():
     )
 
     print("Training...")
-    trainer.train()
+    trainer.train(resume_from_checkpoint=True if args.resume else None)
 
     # Save before anything else so a later crash cannot lose the weights.
     model.save_pretrained(out_dir)
@@ -141,6 +145,7 @@ def main():
 
     (out_dir / "training_summary.json").write_text(json.dumps({
         "base_model": args.model,
+        "data": Path(args.data).name,
         "trained_at": datetime.now(timezone.utc).isoformat(),
         "epochs": args.epochs,
         "max_length": args.max_length,

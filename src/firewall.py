@@ -6,10 +6,13 @@ truststore.inject_into_ssl()
 
 import time
 import base64
+import hashlib
+import json
 import logging
 import os
 import re
 from datetime import datetime, timezone
+from typing import Optional
 from pathlib import Path
 import torch
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
@@ -21,20 +24,57 @@ from normalizer import normalize
 logger = logging.getLogger(__name__)
 
 # Prefer the locally trained detector; fall back to the Hub so a clean clone
-# (models/ is gitignored) can still boot.
+# (models/ is gitignored) and the container image can still boot.
 def _resolve_model_source() -> str:
     if (settings.model_dir / "config.json").exists():
         return str(settings.model_dir)
     if settings.model_hub_id:
-        logger.warning("Local model missing, pulling %s from the Hub", settings.model_hub_id)
-        return settings.model_hub_id
+        from huggingface_hub import snapshot_download
+
+        revision = settings.model_hub_revision or None
+        if not revision:
+            logger.warning("MODEL_HUB_REVISION is not set: serving whatever was pushed "
+                           "to %s last. Pin a commit for production.", settings.model_hub_id)
+        logger.info("Downloading detector %s@%s", settings.model_hub_id, revision or "main")
+        return snapshot_download(settings.model_hub_id, revision=revision,
+                                 token=settings.hf_token or None)
     raise RuntimeError(
         f"No detector model at {settings.model_dir}. Train one with "
         "`python src/train_detector.py` or set MODEL_HUB_ID."
     )
 
 
+def _model_identity(source: str) -> dict:
+    """What is actually being served. The wrong model once ran in production
+    for days after a better one existed; this makes that visible at a glance."""
+    root = Path(source)
+    summary = {}
+    if (root / "training_summary.json").exists():
+        try:
+            summary = json.loads((root / "training_summary.json").read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            pass
+    digest = None
+    weights = root / "model.safetensors"
+    if weights.exists():
+        h = hashlib.sha256()
+        with open(weights, "rb") as f:
+            for chunk in iter(lambda: f.read(1 << 20), b""):
+                h.update(chunk)
+        digest = h.hexdigest()[:12]
+    return {
+        "name": settings.model_hub_id or root.name,
+        "revision": settings.model_hub_revision or None,
+        "weights_sha256": digest,
+        "trained_at": summary.get("trained_at"),
+        "base_model": summary.get("base_model"),
+        "training_data": summary.get("data"),
+        "train_size": summary.get("train_size"),
+    }
+
+
 MODEL_SOURCE = _resolve_model_source()
+MODEL_INFO = _model_identity(MODEL_SOURCE)
 _tokenizer = AutoTokenizer.from_pretrained(MODEL_SOURCE)
 _model = AutoModelForSequenceClassification.from_pretrained(MODEL_SOURCE)
 _model.eval()
@@ -511,8 +551,13 @@ def _decode_hidden_payloads(text: str) -> list[str]:
     return found
 
 
-def detect(prompt: str) -> dict:
-    """Classify prompt security, risk level, threat category, and latency."""
+def detect(prompt: str, threshold: Optional[float] = None) -> dict:
+    """Classify prompt security, risk level, threat category, and latency.
+
+    `threshold` is the block threshold for this call; organisations choose it
+    through their sensitivity setting. Defaults to DECISION_THRESHOLD.
+    """
+    threshold = settings.decision_threshold if threshold is None else threshold
     t0 = time.perf_counter()
     p_clean = prompt.strip()
 
@@ -547,7 +592,7 @@ def detect(prompt: str) -> dict:
         }
 
     malicious_prob, windows_used = _score_windows(p_clean)
-    is_malicious = malicious_prob >= settings.decision_threshold
+    is_malicious = malicious_prob >= threshold
 
     # Obfuscated text is scored in its canonical form too. The raw text is kept
     # as the primary read so normalisation can only ever add signal.
@@ -557,7 +602,7 @@ def detect(prompt: str) -> dict:
         norm_prob, _ = _score_windows(normalized)
         if norm_prob > malicious_prob:
             malicious_prob = norm_prob
-            is_malicious = malicious_prob >= settings.decision_threshold
+            is_malicious = malicious_prob >= threshold
         # Signatures are matched against the canonical form; that is the whole
         # point of normalising.
         scan_text = normalized
@@ -589,7 +634,7 @@ def detect(prompt: str) -> dict:
     for decoded in payloads:
         hidden_tokens = _extract_threat_tokens(decoded)
         hidden_prob, _ = _score_windows(decoded)
-        if hidden_tokens or hidden_prob >= settings.decision_threshold:
+        if hidden_tokens or hidden_prob >= threshold:
             detected_tokens.append({
                 "text": decoded[:80],
                 "category": "Encoded Payload",
@@ -618,9 +663,9 @@ def detect(prompt: str) -> dict:
     if payloads and not decoded_payload and len(benign_payload_scores) == len(payloads):
         without_blobs = _B64_RE.sub(" ", p_clean).strip()
         remainder_prob, _ = _score_windows(without_blobs) if without_blobs else (0.0, 0)
-        if remainder_prob < settings.decision_threshold:
+        if remainder_prob < threshold:
             malicious_prob = max([remainder_prob] + benign_payload_scores)
-            is_malicious = malicious_prob >= settings.decision_threshold
+            is_malicious = malicious_prob >= threshold
 
     # A single "high" hit can be innocent ("how do I disable security warnings?"),
     # but two independent high-severity categories co-occurring is corroboration.
@@ -628,7 +673,7 @@ def detect(prompt: str) -> dict:
     corroborated = len(high_categories) >= 2
 
     heuristic_override = (has_critical or corroborated) \
-        and malicious_prob < settings.decision_threshold
+        and malicious_prob < threshold
     if heuristic_override:
         malicious_prob = max(malicious_prob, 0.72 if has_critical else 0.65)
         is_malicious = True
@@ -648,6 +693,13 @@ def detect(prompt: str) -> dict:
     else:
         risk_level = "SAFE"
         action = "ALLOW"
+
+    # An organisation's sensitivity moves the block threshold away from 0.5,
+    # so the action must follow the verdict rather than the fixed risk bands.
+    if is_malicious and action in ("ALLOW", "FLAG_FOR_REVIEW"):
+        action = "BLOCK"
+    elif not is_malicious and action == "BLOCK_IMMEDIATELY":
+        action = "FLAG_FOR_REVIEW"
 
     # Determine primary threat category
     if is_malicious:
@@ -732,7 +784,7 @@ def scan_output(text: str) -> dict:
     }
 
 
-def run_evasion_test(prompt: str) -> dict:
+def run_evasion_test(prompt: str, threshold: Optional[float] = None) -> dict:
     """Evaluate guardrail resiliency against common adversarial transformations."""
     b64_encoded = base64.b64encode(prompt.encode("utf-8")).decode("utf-8")
     
@@ -747,7 +799,7 @@ def run_evasion_test(prompt: str) -> dict:
     caught_count = 0
     
     for name, p_var in variations:
-        res = detect(p_var)
+        res = detect(p_var, threshold)
         if res["malicious"]:
             caught_count += 1
         results.append({
@@ -777,6 +829,6 @@ if __name__ == "__main__":
         "Can you help me write a thank-you email to my manager?",
     ]
     for t in tests:
-        r = detect(t)
+        r = detect(t, threshold)
         print(f"[{r['verdict']}] Score:{r['risk_score']} ({r['category']}) - {t[:50]}")
 

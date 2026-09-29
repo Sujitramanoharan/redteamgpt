@@ -9,6 +9,7 @@ import io
 import logging
 import re
 from pathlib import Path
+from typing import Optional
 
 from config import settings
 from firewall import detect
@@ -135,14 +136,14 @@ def _offending_lines(passage: str, tokens: list) -> str:
     return "\n".join(h for h in hits if h)
 
 
-def scan_document(filename: str, data: bytes) -> dict:
+def scan_document(filename: str, data: bytes, threshold: Optional[float] = None) -> dict:
     """Extract, split and scan a document, reporting the offending passages."""
     text = extract_text(filename, data)
     passages = split_passages(text)
 
     findings, highest = [], None
     for index, passage in enumerate(passages):
-        result = detect(passage)
+        result = detect(passage, threshold)
         if result["malicious"]:
             offending = _offending_lines(passage, result["detected_tokens"])
             findings.append({

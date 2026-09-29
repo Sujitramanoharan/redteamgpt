@@ -81,3 +81,16 @@ yarl==1.24.5
 pypdf==6.19.0
 python-docx==1.2.0
 python-multipart==0.0.32
+
+# --- Production SaaS: database, accounts, secrets ---
+SQLAlchemy==2.1.1
+alembic==1.20.0
+Mako==1.4.3
+psycopg[binary]==3.3.6
+argon2-cffi==25.1.0
+cryptography==50.0.1
+email-validator==2.3.0
+dnspython==2.8.0
+# Optional at runtime: used only when REDIS_URL / SENTRY_DSN are set.
+redis==8.1.0
+sentry-sdk==2.71.0

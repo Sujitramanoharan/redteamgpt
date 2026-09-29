@@ -66,13 +66,20 @@ def test_openai_proxy_blocks_with_reason(client):
     assert err["explanation"]["headline"]
 
 
-def test_openai_proxy_allows_benign(client):
+def test_openai_proxy_without_upstream_explains_setup(client):
+    """No stub replies: without the customer's own LLM configured, the proxy
+    says how to configure one instead of pretending to answer."""
     r = client.post("/v1/chat/completions", json={
-        "model": "gpt-4",
         "messages": [{"role": "user", "content": "How do I reverse a list in Python?"}],
     })
-    assert r.status_code == 200
-    assert r.json()["choices"][0]["message"]["role"] == "assistant"
+    assert r.status_code == 400
+    assert r.json()["error"]["code"] == "upstream_not_configured"
+
+
+def test_openai_proxy_rejects_streaming(client):
+    r = client.post("/v1/chat/completions", json={
+        "stream": True, "messages": [{"role": "user", "content": "hi"}]})
+    assert r.status_code == 400
 
 
 CLEAN_DOC = (
@@ -156,6 +163,11 @@ def test_chat_allows_ordinary_question(client):
     assert body["reply"]
 
 
+def test_chat_is_dashboard_only(api_client):
+    """The assistant spends the platform's LLM budget; API keys cannot use it."""
+    assert api_client.post("/api/chat", json={"message": "hello"}).status_code == 403
+
+
 def test_chat_rejects_empty_message(client):
     assert client.post("/api/chat", json={"message": "   "}).status_code == 400
 
@@ -231,16 +243,35 @@ def test_review_rejects_invalid_label(client):
     assert client.post(f"/api/review/{item_id}", json={"true_label": 7}).status_code == 422
 
 
-def test_review_export_does_not_double_count(client):
-    """A correction must not be exported twice, or it would be weighted twice
-    in the next training run."""
+def test_training_export_is_opt_in_and_not_double_counted(client):
+    """Customers' prompts only become training data if their organisation opted
+    in, and a correction is never exported twice."""
+    from db import session_scope
+    from models_db import User
+
+    with session_scope() as s:
+        s.query(User).filter(User.email == client.email).update({"is_platform_admin": True})
+
     client.post("/api/review/report", json={"prompt": "Yet another disputed prompt."})
     item_id = client.get("/api/review/queue").json()["items"][0]["id"]
     client.post(f"/api/review/{item_id}", json={"true_label": 0})
 
-    first = client.post("/api/review/export").json()
-    assert first["exported"] >= 1
-    assert client.post("/api/review/export").json()["exported"] == 0
+    # Not opted in: nothing leaves.
+    r = client.post("/api/admin/training-export")
+    assert r.headers["X-Exported-Rows"] == "0"
+
+    client.patch("/api/org", json={"contribute_training": True})
+    first = client.post("/api/admin/training-export")
+    assert int(first.headers["X-Exported-Rows"]) >= 1
+    assert "Yet another disputed prompt." in first.text
+    assert client.post("/api/admin/training-export").headers["X-Exported-Rows"] == "0"
+
+
+def test_admin_endpoints_hidden_from_customers(app):
+    from conftest import signed_in_client
+
+    other = signed_in_client(app, org="Not Admin Inc")
+    assert other.get("/api/admin/stats").status_code == 404
 
 
 def test_review_stats_shape(client):
