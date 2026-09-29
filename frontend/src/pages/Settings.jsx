@@ -92,13 +92,13 @@ export function OrganizationSettings() {
 
   return (
     <>
+      <Status {...status} />
       <Section title="Organisation" description="Everyone in your organisation shares its logs, review queue and API keys.">
         <form className="inline-form" onSubmit={(e) => { e.preventDefault(); save({ name }, 'Name saved.'); }}>
           <input type="text" value={name} onChange={(e) => setName(e.target.value)} disabled={!admin}
                  minLength={2} maxLength={120} aria-label="Organisation name" />
           {admin && <button className="btn btn-primary">Save</button>}
         </form>
-        <Status {...status} />
       </Section>
 
       <Section title="Detection sensitivity"

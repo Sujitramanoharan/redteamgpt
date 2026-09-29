@@ -117,7 +117,13 @@ a.btn { text-decoration: none; }
   font-size: 12px; color: var(--text-muted); padding: 6px 10px 8px;
   border-bottom: 1px solid var(--border-color); margin-bottom: 4px;
 }
-@media (max-width: 1350px) { .usage-pill, .user-menu-email { display: none; } }
+/* Tabs became links when they became routes. */
+a.nav-tab { text-decoration: none; }
+.nav-tabs { min-width: 0; }
+.user-menu-org { max-width: 150px; }
+/* Eight tabs need the room more than the header extras do. */
+@media (max-width: 1800px) { .user-menu-email { display: none; } }
+@media (max-width: 1700px) { .usage-pill { display: none; } }
 
 /* --- Settings ------------------------------------------------------------ */
 .settings-layout { display: grid; grid-template-columns: 220px 1fr; gap: 24px; align-items: start; }
