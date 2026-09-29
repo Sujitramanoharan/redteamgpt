@@ -35,6 +35,14 @@ def test_api_keys_cannot_manage_the_account(api_client):
     assert api_client.post("/api/logs/clear").status_code == 403
 
 
+def test_bearer_header_accepted_for_openai_sdks(app, api_key):
+    c = TestClient(app)
+    c.headers["Authorization"] = f"Bearer {api_key}"
+    assert c.post("/api/check", json={"prompt": "hello"}).status_code == 200
+    c.headers["Authorization"] = "Bearer sk-not-ours"
+    assert c.post("/api/check", json={"prompt": "hello"}).status_code == 401
+
+
 def test_api_key_needs_no_csrf(api_client):
     assert api_client.post("/api/check", json={"prompt": "hello"}).status_code == 200
 

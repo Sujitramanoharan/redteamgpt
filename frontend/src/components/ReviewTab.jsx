@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { CheckCircle2, XCircle, ClipboardCheck, Download, RefreshCw, Inbox } from 'lucide-react';
+import { CheckCircle2, XCircle, ClipboardCheck, RefreshCw, Inbox } from 'lucide-react';
+import { api } from '../api';
 
 export default function ReviewTab() {
   const [items, setItems] = useState([]);
@@ -13,8 +14,8 @@ export default function ReviewTab() {
     setBusy(true);
     try {
       const [q, s] = await Promise.all([
-        fetch(`/api/review/queue?status=${tab}`).then(r => r.json()),
-        fetch('/api/review/stats').then(r => r.json()),
+        api.get(`/api/review/queue?status=${tab}`),
+        api.get('/api/review/stats'),
       ]);
       setItems(q.items || []);
       setStats(s);
@@ -28,22 +29,14 @@ export default function ReviewTab() {
   useEffect(() => { load(); }, [load]);
 
   const decide = async (id, trueLabel) => {
-    await fetch(`/api/review/${id}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ true_label: trueLabel, note: notes[id] || '' }),
-    });
+    try {
+      await api.post(`/api/review/${id}`, { true_label: trueLabel, note: notes[id] || '' });
+    } catch (err) {
+      setMessage(err.message);
+    }
     load();
   };
 
-  const exportData = async () => {
-    const res = await fetch('/api/review/export', { method: 'POST' });
-    const data = await res.json();
-    setMessage(data.exported
-      ? `Exported ${data.exported} reviewed decision(s) to data/review_feedback.csv — ${data.total_rows} rows total. Retrain to apply them.`
-      : 'Nothing new to export.');
-    load();
-  };
 
   return (
     <div className="tab-pane">
@@ -52,17 +45,14 @@ export default function ReviewTab() {
           <h2>Human Review Queue</h2>
           <p className="pane-desc">
             When the rule layer and the classifier disagree, a person decides. Those
-            decisions become labelled training data, so the firewall learns from its
-            own mistakes instead of repeating them.
+            decisions show exactly where the firewall is unsure. Admins record decisions;
+            if your organisation opts in under Settings → Data &amp; privacy, they also help
+            train the detector.
           </p>
         </div>
         <div className="quick-stats-pills">
           <button className="btn btn-secondary btn-sm" onClick={load} disabled={busy}>
             <RefreshCw size={13} /> Refresh
-          </button>
-          <button className="btn btn-primary btn-sm" onClick={exportData}
-                  disabled={!stats?.ready_to_export}>
-            <Download size={13} /> Export {stats?.ready_to_export || 0} for training
           </button>
         </div>
       </div>

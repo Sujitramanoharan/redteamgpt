@@ -127,8 +127,22 @@ def _from_session(request: Request, db: Session) -> Optional[Principal]:
                      is_platform_admin=user.is_platform_admin)
 
 
+def presented_api_key(request: Request) -> str:
+    """X-API-Key, or "Authorization: Bearer rtg_live_..." - the header the
+    official OpenAI SDKs send, so the /v1 proxy is a true drop-in."""
+    key = request.headers.get("x-api-key", "").strip()
+    if key:
+        return key
+    auth = request.headers.get("authorization", "")
+    if auth.lower().startswith("bearer "):
+        token = auth[7:].strip()
+        if token.startswith(API_KEY_PREFIX):
+            return token
+    return ""
+
+
 def get_principal(request: Request, db: Session = Depends(get_db)) -> Principal:
-    raw_key = request.headers.get("x-api-key", "").strip()
+    raw_key = presented_api_key(request)
     if raw_key:
         principal = _from_api_key(raw_key, db)
     else:
@@ -288,7 +302,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         # Keyed by credential rather than IP, so customers behind one NAT do
         # not share a budget, and one customer cannot exhaust another's.
-        key = request.headers.get("x-api-key", "")
+        key = presented_api_key(request)
         cookie = request.cookies.get(SESSION_COOKIE, "")
         client_id = (_fingerprint(key) if key else
                      _fingerprint(cookie) if cookie else client_ip(request))

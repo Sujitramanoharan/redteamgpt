@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Download, Trash2, Search, BarChart2, ShieldAlert } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, BarChart, Bar, XAxis, YAxis } from 'recharts';
+import { api } from '../api';
 
 export default function TelemetryTab() {
   const [metrics, setMetrics] = useState(null);
@@ -14,16 +15,12 @@ export default function TelemetryTab() {
 
   const fetchTelemetry = async () => {
     try {
-      const [mRes, lRes] = await Promise.all([
-        fetch("/api/metrics"),
-        fetch(`/api/logs?limit=50&verdict=${verdictFilter === 'ALL' ? '' : verdictFilter}&search=${encodeURIComponent(search)}`)
+      const [m, l] = await Promise.all([
+        api.get("/api/metrics"),
+        api.get(`/api/logs?limit=50&verdict=${verdictFilter === 'ALL' ? '' : verdictFilter}&search=${encodeURIComponent(search)}`)
       ]);
-
-      if (mRes.ok) setMetrics(await mRes.json());
-      if (lRes.ok) {
-        const lData = await lRes.json();
-        setLogs(lData.logs || []);
-      }
+      setMetrics(m);
+      setLogs(l.logs || []);
     } catch (err) {
       console.error("Failed to fetch telemetry:", err);
     }
@@ -31,7 +28,11 @@ export default function TelemetryTab() {
 
   const clearHistory = async () => {
     if (!confirm("Are you sure you want to clear all security logs?")) return;
-    await fetch("/api/logs/clear", { method: "POST" });
+    try {
+      await api.post("/api/logs/clear");
+    } catch (err) {
+      alert(err.message);
+    }
     fetchTelemetry();
   };
 
