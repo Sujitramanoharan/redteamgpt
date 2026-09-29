@@ -5,8 +5,8 @@ services:
   - type: web
     name: redteamgpt
     runtime: docker
-    # The PyTorch model needs ~1.5 GB RAM. With INFERENCE_BACKEND=onnx a
-    # smaller plan may be enough; check memory in the Metrics tab first.
+    # See RUNBOOK.md "Scaling" for measured memory; start here and check the
+    # Metrics tab before moving to a smaller plan.
     plan: standard
     region: singapore
     healthCheckPath: /ready
@@ -36,8 +36,10 @@ services:
         sync: false
       - key: HF_TOKEN
         sync: false
+      # The image ships ONNX Runtime only. Publish models with model.onnx
+      # (python src/export_onnx.py) - the app refuses to start without it.
       - key: INFERENCE_BACKEND
-        value: torch
+        value: onnx
 
       # --- Email (any SMTP provider) ---
       - key: SMTP_HOST

@@ -19,16 +19,20 @@ ENV PYTHONUNBUFFERED=1 \
     PORT=7860 \
     HF_HOME=/app/.cache/huggingface \
     ENVIRONMENT=production \
-    AUTO_MIGRATE=false
+    AUTO_MIGRATE=false \
+    INFERENCE_BACKEND=onnx
 
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/*
 
-# CPU-only torch is ~750MB smaller than the default CUDA build and this runs on CPU.
-COPY requirements.txt .
-RUN pip install --extra-index-url https://download.pytorch.org/whl/cpu -r requirements.txt
+# Serving needs no torch: the model runs on ONNX Runtime (src/export_onnx.py
+# proves verdict parity before a model is published). Installing the full
+# requirements.txt here used to pull torch from PyPI together with several GB
+# of CUDA libraries, despite the CPU index.
+COPY requirements-runtime.txt .
+RUN pip install -r requirements-runtime.txt
 
 COPY backend ./backend
 COPY src ./src

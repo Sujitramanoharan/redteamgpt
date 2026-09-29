@@ -102,8 +102,8 @@ Promote only if **all** of the following hold:
 
 Then:
 
-1. Optional: `python src/export_onnx.py --model models/detector-next`. If it passes parity,
-   set `INFERENCE_BACKEND=onnx`. If it fails, stay on `torch`.
+1. `python src/export_onnx.py --model models/detector-next` **(required: the production
+   image only runs ONNX)**. If it reports no passing candidate, do not promote the model.
 2. `python src/upload_model.py --repo <you>/redteamgpt-detector --path models/detector-next --private`
 3. In Render, set `MODEL_HUB_REVISION` to the printed commit and redeploy.
 4. Confirm `/ready` shows the new `weights_sha256`.
@@ -173,15 +173,27 @@ container applies it on start.
 
 ## Scaling
 
-Each worker loads its own copy of the model, about 1.5 GB with PyTorch. Scale in this order:
+The production image serves the model with ONNX Runtime and does not install torch.
+Measured on v5, same prompts:
 
-1. A larger instance with `WEB_CONCURRENCY=2`.
+| Backend | Private memory per worker | Verdict agreement with PyTorch | Speed |
+|---|---|---|---|
+| PyTorch (`requirements.txt`) | ~1,320 MB | reference | 1× |
+| ONNX fp32, no torch (`requirements-runtime.txt`) | ~620 MB | 100% (1,238 prompts, 0 flips) | ~2.6× faster |
+
+int8 quantisation was rejected: it flipped 24–46 verdicts. `src/export_onnx.py` repeats this
+check for every new model and only writes `model.onnx` if agreement is at least 99.5%.
+
+Each worker loads its own copy of the model, so on Render's 2 GB Standard plan
+`WEB_CONCURRENCY=2` fits comfortably. The 512 MB Starter plan does not. Scale in this order:
+
+1. `WEB_CONCURRENCY=2` on Standard, then a larger plan.
 2. More instances, with `REDIS_URL` set (for example, Render Key Value) so rate limits are
    shared across them.
 
-The database holds all other state. Measured capacity on an 8-core CPU is about 11 requests
-per second per instance (`results/loadtest.json`); re-measure with `python src/loadtest.py`
-after any model change.
+The database holds all other state. Re-measure throughput after any model change:
+`python src/loadtest.py --api-key <key>` against a server started with
+`RATE_LIMIT_PER_MINUTE=100000`.
 
 ## Known limitations
 
