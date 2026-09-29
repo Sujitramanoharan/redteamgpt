@@ -14,8 +14,9 @@ import re
 from datetime import datetime, timezone
 from typing import Optional
 from pathlib import Path
-import torch
-from transformers import AutoTokenizer, AutoModelForSequenceClassification
+
+import numpy as np
+from transformers import AutoTokenizer
 
 from config import settings
 from normalizer import describe as normalizer_describe
@@ -55,7 +56,7 @@ def _model_identity(source: str) -> dict:
         except (OSError, json.JSONDecodeError):
             pass
     digest = None
-    weights = root / "model.safetensors"
+    weights = root / (ONNX_FILE if settings.inference_backend == "onnx" else "model.safetensors")
     if weights.exists():
         h = hashlib.sha256()
         with open(weights, "rb") as f:
@@ -70,19 +71,48 @@ def _model_identity(source: str) -> dict:
         "base_model": summary.get("base_model"),
         "training_data": summary.get("data"),
         "train_size": summary.get("train_size"),
+        "backend": settings.inference_backend,
     }
 
 
+ONNX_FILE = "model.onnx"
 MODEL_SOURCE = _resolve_model_source()
 MODEL_INFO = _model_identity(MODEL_SOURCE)
 _tokenizer = AutoTokenizer.from_pretrained(MODEL_SOURCE)
-_model = AutoModelForSequenceClassification.from_pretrained(MODEL_SOURCE)
-_model.eval()
 # Intra-op threads per inference. FastAPI already runs sync endpoints in a
 # threadpool, so under concurrent load several inferences run at once; giving
 # each one several threads oversubscribes the cores and they fight. Measured
 # on this 8-core box: see results/loadtest.json.
-torch.set_num_threads(settings.torch_threads or max(1, (os.cpu_count() or 2) // 2))
+_THREADS = settings.torch_threads or max(1, (os.cpu_count() or 2) // 2)
+
+if settings.inference_backend == "onnx":
+    # ONNX Runtime: less memory and faster on CPU, and torch is not imported
+    # at all. Only served once src/export_onnx.py has shown it makes the same
+    # decisions as the PyTorch weights.
+    import onnxruntime as ort
+
+    _onnx_path = Path(MODEL_SOURCE) / ONNX_FILE
+    if not _onnx_path.exists():
+        raise RuntimeError(f"INFERENCE_BACKEND=onnx but {_onnx_path} is missing. "
+                           "Run `python src/export_onnx.py --model <dir>` first.")
+    _opts = ort.SessionOptions()
+    _opts.intra_op_num_threads = _THREADS
+    _session = ort.InferenceSession(str(_onnx_path), _opts, providers=["CPUExecutionProvider"])
+
+    def _logits(input_ids: np.ndarray, attention_mask: np.ndarray) -> np.ndarray:
+        return _session.run(["logits"], {"input_ids": input_ids, "attention_mask": attention_mask})[0]
+else:
+    import torch
+    from transformers import AutoModelForSequenceClassification
+
+    _model = AutoModelForSequenceClassification.from_pretrained(MODEL_SOURCE)
+    _model.eval()
+    torch.set_num_threads(_THREADS)
+
+    def _logits(input_ids: np.ndarray, attention_mask: np.ndarray) -> np.ndarray:
+        with torch.no_grad():
+            return _model(input_ids=torch.from_numpy(input_ids),
+                          attention_mask=torch.from_numpy(attention_mask)).logits.numpy()
 
 MAX_LEN = settings.max_sequence_length
 STRIDE = settings.chunk_stride
@@ -103,15 +133,14 @@ def _score_windows(text: str) -> tuple[float, int]:
         stride=STRIDE,
         return_overflowing_tokens=True,
         padding=True,
-        return_tensors="pt",
+        return_tensors="np",
     )
-    input_ids = enc["input_ids"][:MAX_WINDOWS]
-    attention_mask = enc["attention_mask"][:MAX_WINDOWS]
+    input_ids = enc["input_ids"][:MAX_WINDOWS].astype(np.int64)
+    attention_mask = enc["attention_mask"][:MAX_WINDOWS].astype(np.int64)
 
-    with torch.no_grad():
-        logits = _model(input_ids=input_ids, attention_mask=attention_mask).logits
-        probs = torch.softmax(logits, dim=1)[:, 1]
-
+    logits = _logits(input_ids, attention_mask)
+    exp = np.exp(logits - logits.max(axis=1, keepdims=True))  # stable softmax
+    probs = exp[:, 1] / exp.sum(axis=1)
     return float(probs.max()), int(input_ids.shape[0])
 
 # Known threat signatures. Each carries a plain-English reason so the UI can tell a

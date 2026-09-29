@@ -18,7 +18,8 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PORT=7860 \
     HF_HOME=/app/.cache/huggingface \
-    ENVIRONMENT=production
+    ENVIRONMENT=production \
+    AUTO_MIGRATE=false
 
 WORKDIR /app
 
@@ -31,24 +32,28 @@ RUN pip install --extra-index-url https://download.pytorch.org/whl/cpu -r requir
 
 COPY backend ./backend
 COPY src ./src
+COPY alembic ./alembic
+COPY alembic.ini ./
+COPY scripts/start.sh ./start.sh
 COPY frontend/index.html ./frontend/
 COPY --from=frontend-builder /build/dist ./frontend/dist
-# models/ is gitignored; COPY only succeeds when weights are present locally.
-# Without them the app falls back to MODEL_HUB_ID at startup.
-COPY model[s] ./models
+# Model weights are not baked in: the app downloads MODEL_HUB_ID at the pinned
+# MODEL_HUB_REVISION on startup, so a model change never needs an image rebuild.
 COPY result[s] ./results
 
-# Spaces runs as uid 1000 and needs these paths writable.
 RUN useradd -m -u 1000 appuser \
     && mkdir -p /app/data /app/.cache/huggingface \
+    && chmod +x /app/start.sh \
     && chown -R appuser:appuser /app
 USER appuser
 
 EXPOSE 7860
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
-    CMD curl -fsS http://localhost:7860/health || exit 1
+# Readiness, not liveness: the model must be loaded and the database reachable.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=120s --retries=3 \
+    CMD curl -fsS "http://localhost:${PORT}/ready" || exit 1
 
-# One worker: each worker loads its own copy of the model, and the free tier
-# cannot afford two. Scale with replicas behind a load balancer instead.
-CMD ["sh", "-c", "uvicorn backend.main:app --host 0.0.0.0 --port ${PORT:-7860} --workers 1"]
+# One worker by default: each worker loads its own copy of the model. Scale
+# with WEB_CONCURRENCY on a bigger instance, or with more instances plus
+# REDIS_URL so rate limits are shared.
+CMD ["/app/start.sh"]

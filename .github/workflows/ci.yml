@@ -12,8 +12,29 @@ concurrency:
 
 jobs:
   backend:
-    name: Backend tests
+    name: Backend tests (Postgres)
     runs-on: ubuntu-latest
+    services:
+      # Production runs on Postgres, so the suite does too; SQLite hides
+      # locking, typing and JSON differences.
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: redteamgpt_test
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U ci"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgresql://ci:ci@localhost:5432/redteamgpt_test
+      # Set these repository variables/secrets to test against the published
+      # model instead of training a fresh one on every run.
+      MODEL_HUB_ID: ${{ vars.MODEL_HUB_ID }}
+      MODEL_HUB_REVISION: ${{ vars.MODEL_HUB_REVISION }}
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      MODEL_DIR: models/ci-absent
     steps:
       - uses: actions/checkout@v4
 
@@ -28,11 +49,16 @@ jobs:
           pip install --extra-index-url https://download.pytorch.org/whl/cpu -r requirements.txt
 
       - name: Train a detector for CI
-        # models/ is gitignored, so CI trains a small one rather than
-        # depending on weights that are not in the repository.
-        run: python src/train_detector.py
+        # models/ is gitignored. Without a published model to pull, train one.
+        if: ${{ vars.MODEL_HUB_ID == '' }}
+        run: python src/train_detector.py --output models/ci-absent
         env:
           CI: "true"
+
+      - name: Migrations apply cleanly to an empty database
+        run: alembic upgrade head
+        env:
+          DATABASE_URL: ${{ env.TEST_DATABASE_URL }}
 
       - name: Run tests
         run: python -m pytest tests/ -v --tb=short

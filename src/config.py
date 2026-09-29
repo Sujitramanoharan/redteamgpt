@@ -1,5 +1,6 @@
 """Central configuration. Every deployment knob is an environment variable so the
 same image runs unchanged on a free Space and on a paid cluster."""
+import os
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, List
@@ -21,8 +22,10 @@ class Settings(BaseSettings):
     port: int = 7860
 
     # Public URL of the app. Links in emails point here, and in production it
-    # must be https so session cookies can be marked Secure.
-    app_base_url: str = "http://localhost:5174"
+    # must be https so session cookies can be marked Secure. Render sets
+    # RENDER_EXTERNAL_URL, so a Render deploy works without setting this.
+    app_base_url: str = Field(
+        default_factory=lambda: os.environ.get("RENDER_EXTERNAL_URL", "http://localhost:5174"))
 
     # --- Accounts and sessions ---------------------------------------------
     # Every caller is an organisation: dashboard users sign in with a session
@@ -71,6 +74,8 @@ class Settings(BaseSettings):
     max_sequence_length: int = 256
     chunk_stride: int = 64
     decision_threshold: float = 0.5
+    # "torch" or "onnx" (from src/export_onnx.py, which checks verdict parity).
+    inference_backend: str = "torch"
     # Intra-op threads per inference. 0 means half the cores. Under concurrent
     # load a lower value usually wins, because requests already run in
     # parallel and per-inference threads then compete for the same cores.
