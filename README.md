@@ -31,21 +31,29 @@ hand-written probes. Every figure below comes from `results/heldout-*.json`
 (`python src/eval_heldout.py`), for the full pipeline users get: model, rules, normaliser and
 base64 decoding.
 
-| Held-out slice | v5 (current) |
-|---|---|
-| Attack recall, all sources | 79.3% |
-| False-positive rate, all benign sources | 9.9% |
-| Real chatbot users' benign messages allowed (toxic-chat) | 87.8% |
-| Newest real-world jailbreaks blocked | 90.9% |
-| Persona / paraphrase attack probe blocked | 55.0% |
-| Everyday-prompt probe allowed | 98.9% |
+| Held-out slice | v5 | **v6 (current)** |
+|---|---|---|
+| Attack recall, all sources | 79.3% | **85.8%** |
+| False-positive rate, all benign sources | 9.9% | **4.2%** |
+| Real chatbot users' benign messages allowed (toxic-chat) | 87.8% | **94.8%** |
+| Real chatbot jailbreaks blocked (toxic-chat) | 92.1% | **93.3%** |
+| Newest real-world jailbreaks blocked | 90.9% | 89.1% |
+| Labelled injections blocked (deepset) | 15.0% | **60.0%** |
+| Persona / paraphrase attack probe blocked | 55.0% | **85.0%** |
+| Everyday-prompt probe allowed | 98.9% | **100%** |
+| Regression benchmark (`src/benchmark.py`) | 46/48 | **48/48** |
+
+v6 adds real user traffic and real-world jailbreaks to training, with a guard that keeps
+every held-out prompt out of the training set. The newest-jailbreak slice dipped by 5 of 276
+prompts; everything else improved.
 
 The in-distribution test split reads about 98% accuracy. That number is not useful: it shares
 every bias of the training data, and it read 98.5% while an earlier model blocked any prompt
 without a full stop.
 
-**Treat this as one layer of defence.** Soft persona tricks and polite paraphrases are the
-weakest category. Keep least-privilege tool access and output validation in your application
+**Treat this as one layer of defence.** Soft persona tricks are still the weakest category:
+the "my deceased grandma used to read me Windows keys" style of attack, for example, is not
+caught. Keep least-privilege tool access and output validation in your application
 too.
 
 ## Local development
