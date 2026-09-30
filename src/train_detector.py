@@ -24,7 +24,8 @@ from sklearn.metrics import (accuracy_score, f1_score, precision_score,
 from sklearn.model_selection import train_test_split
 from torch.utils.data import Dataset as TorchDataset
 from transformers import (AutoModelForSequenceClassification, AutoTokenizer,
-                          DataCollatorWithPadding, Trainer, TrainingArguments)
+                          DataCollatorWithPadding, Trainer, TrainerCallback,
+                          TrainingArguments)
 
 # The corporate network blocks Hugging Face's Xet CDN with a 403, so use the
 # classic download path unless the caller has already decided otherwise.
@@ -66,6 +67,23 @@ def compute_metrics(pred):
         "f1": f1_score(labels, preds, zero_division=0),
         "roc_auc": roc_auc_score(labels, probs),
     }
+
+
+SAVE_EVERY = 100
+
+
+class SaveEverySteps(TrainerCallback):
+    """Force a checkpoint every SAVE_EVERY steps.
+
+    save_steps alone is not enough: resuming restores the save schedule stored
+    in the old checkpoint, so a run first started with per-epoch saving keeps
+    saving per epoch. That lost an hour when the laptop slept mid-epoch.
+    """
+
+    def on_step_end(self, args, state, control, **kwargs):
+        if state.global_step % SAVE_EVERY == 0:
+            control.should_save = True
+        return control
 
 
 def _keep_awake() -> None:
@@ -127,7 +145,7 @@ def main():
         # checkpoints were not enough either - the laptop slept at 99% of the
         # second epoch and an hour of work went back to the epoch-1 save.
         save_strategy="steps",
-        save_steps=100,
+        save_steps=SAVE_EVERY,
         save_total_limit=2,
         report_to="none",
     )
@@ -139,6 +157,7 @@ def main():
         eval_dataset=test_ds,
         data_collator=DataCollatorWithPadding(tokenizer),
         compute_metrics=compute_metrics,
+        callbacks=[SaveEverySteps()],
     )
 
     print("Training...")
