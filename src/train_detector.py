@@ -68,6 +68,16 @@ def compute_metrics(pred):
     }
 
 
+def _keep_awake() -> None:
+    """Ask Windows not to idle-sleep while this process runs. It lapses by
+    itself when the process exits, and does not change power settings. (Closing
+    the lid still sleeps the machine.)"""
+    if os.name == "nt":
+        import ctypes
+        ES_CONTINUOUS, ES_SYSTEM_REQUIRED = 0x80000000, 0x00000001
+        ctypes.windll.kernel32.SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED)
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--model", default="distilbert-base-uncased")
@@ -84,6 +94,7 @@ def main():
 
     out_dir = Path(args.output)
     out_dir.mkdir(parents=True, exist_ok=True)
+    _keep_awake()
     torch.set_num_threads(max(1, (os.cpu_count() or 4)))
 
     df = pd.read_csv(args.data).dropna(subset=["text"])
@@ -111,11 +122,13 @@ def main():
         weight_decay=0.01,
         logging_steps=50,
         eval_strategy="epoch",
-        # Checkpoint every epoch. A four-hour CPU run was lost once because
-        # weights were only written after the final step; a crash or a closed
-        # session at 99% left nothing behind.
-        save_strategy="epoch",
-        save_total_limit=1,
+        # Checkpoint every 100 steps (~10 minutes on CPU). A four-hour run was
+        # once lost because weights were only written at the end; per-epoch
+        # checkpoints were not enough either - the laptop slept at 99% of the
+        # second epoch and an hour of work went back to the epoch-1 save.
+        save_strategy="steps",
+        save_steps=100,
+        save_total_limit=2,
         report_to="none",
     )
 
