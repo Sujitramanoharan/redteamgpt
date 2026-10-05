@@ -37,8 +37,12 @@ def _resolve_model_source() -> str:
             logger.warning("MODEL_HUB_REVISION is not set: serving whatever was pushed "
                            "to %s last. Pin a commit for production.", settings.model_hub_id)
         logger.info("Downloading detector %s@%s", settings.model_hub_id, revision or "main")
+        # Fetch only the weights this backend serves: the repo holds both the
+        # PyTorch and ONNX copies, and free hosts re-download on every restart.
+        weights = "model.onnx" if settings.inference_backend == "onnx" else "model.safetensors"
         return snapshot_download(settings.model_hub_id, revision=revision,
-                                 token=settings.hf_token or None)
+                                 token=settings.hf_token or None,
+                                 allow_patterns=["*.json", weights])
     raise RuntimeError(
         f"No detector model at {settings.model_dir}. Train one with "
         "`python src/train_detector.py` or set MODEL_HUB_ID."
