@@ -1,41 +1,47 @@
-# Local and single-VM deployment. For Hugging Face Spaces the Dockerfile is
-# used directly and this file is ignored.
+# Production-shaped local stack: the app container plus Postgres, as on Render.
+#   cp .env.example .env    # fill in ENCRYPTION_KEY, MODEL_HUB_ID, etc.
+#   docker compose up --build
+# Then open http://localhost:7860. With SMTP unset, sign-up links are printed
+# in `docker compose logs app`.
 services:
-  redteamgpt:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: redteamgpt
+      POSTGRES_USER: redteamgpt
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-redteamgpt-local}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U redteamgpt"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  app:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: redteamgpt_firewall
+    depends_on:
+      db:
+        condition: service_healthy
     ports:
       - "${PORT:-7860}:7860"
+    env_file: .env
     environment:
-      ENVIRONMENT: production
       PORT: 7860
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      LOG_JSON: "true"
-      REQUIRE_AUTH: ${REQUIRE_AUTH:-true}
-      API_KEYS: ${API_KEYS:?set API_KEYS in .env before starting}
-      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5174}
-      RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-60}
-      DATABASE_PATH: /app/data/audit.db
-    volumes:
-      # Audit history must outlive the container.
-      - redteamgpt_data:/app/data
+      DATABASE_URL: postgresql://redteamgpt:${POSTGRES_PASSWORD:-redteamgpt-local}@db:5432/redteamgpt
+      # Local stack runs over plain http, so relax the production checks that
+      # only make sense behind TLS. Never set these on a public deployment.
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      APP_BASE_URL: ${APP_BASE_URL:-http://localhost:7860}
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:7860/health"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 60s
     deploy:
       resources:
         limits:
           cpus: "2.0"
           memory: 2G
-        reservations:
-          cpus: "0.5"
-          memory: 1G
 
 volumes:
-  redteamgpt_data:
+  pgdata:

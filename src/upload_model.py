@@ -59,17 +59,20 @@ def main() -> int:
 
     api.create_repo(repo_id=args.repo, repo_type="model",
                     private=args.private, exist_ok=True)
-    api.upload_folder(
+    commit = api.upload_folder(
         folder_path=str(model_dir),
         repo_id=args.repo,
         repo_type="model",
         # Training checkpoints can be many GB and are not needed for inference.
         ignore_patterns=["checkpoints/*", "**/optimizer.pt", "**/scheduler.pt"],
-        commit_message="Upload RedTeamGPT prompt-injection detector",
+        commit_message=f"Upload detector from {model_dir.name}",
     )
 
     print(f"\nDone: https://huggingface.co/{args.repo}")
-    print(f"Set MODEL_HUB_ID={args.repo} in your deployment environment.")
+    print("Set these in your deployment environment:")
+    print(f"  MODEL_HUB_ID={args.repo}")
+    # Pinning the commit means a later push cannot silently change production.
+    print(f"  MODEL_HUB_REVISION={commit.oid}")
     return 0
 
 

@@ -24,7 +24,8 @@ from sklearn.metrics import (accuracy_score, f1_score, precision_score,
 from sklearn.model_selection import train_test_split
 from torch.utils.data import Dataset as TorchDataset
 from transformers import (AutoModelForSequenceClassification, AutoTokenizer,
-                          DataCollatorWithPadding, Trainer, TrainingArguments)
+                          DataCollatorWithPadding, Trainer, TrainerCallback,
+                          TrainingArguments)
 
 # The corporate network blocks Hugging Face's Xet CDN with a 403, so use the
 # classic download path unless the caller has already decided otherwise.
@@ -68,6 +69,33 @@ def compute_metrics(pred):
     }
 
 
+SAVE_EVERY = 100
+
+
+class SaveEverySteps(TrainerCallback):
+    """Force a checkpoint every SAVE_EVERY steps.
+
+    save_steps alone is not enough: resuming restores the save schedule stored
+    in the old checkpoint, so a run first started with per-epoch saving keeps
+    saving per epoch. That lost an hour when the laptop slept mid-epoch.
+    """
+
+    def on_step_end(self, args, state, control, **kwargs):
+        if state.global_step % SAVE_EVERY == 0:
+            control.should_save = True
+        return control
+
+
+def _keep_awake() -> None:
+    """Ask Windows not to idle-sleep while this process runs. It lapses by
+    itself when the process exits, and does not change power settings. (Closing
+    the lid still sleeps the machine.)"""
+    if os.name == "nt":
+        import ctypes
+        ES_CONTINUOUS, ES_SYSTEM_REQUIRED = 0x80000000, 0x00000001
+        ctypes.windll.kernel32.SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED)
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--model", default="distilbert-base-uncased")
@@ -76,13 +104,18 @@ def main():
     p.add_argument("--batch-size", type=int, default=8)
     p.add_argument("--lr", type=float, default=2e-5)
     p.add_argument("--max-length", type=int, default=256)
+    p.add_argument("--data", default=str(DATA),
+                   help="training CSV (text,label[,source])")
+    p.add_argument("--resume", action="store_true",
+                   help="continue from the latest checkpoint in <output>/checkpoints")
     args = p.parse_args()
 
     out_dir = Path(args.output)
     out_dir.mkdir(parents=True, exist_ok=True)
+    _keep_awake()
     torch.set_num_threads(max(1, (os.cpu_count() or 4)))
 
-    df = pd.read_csv(DATA).dropna(subset=["text"])
+    df = pd.read_csv(args.data).dropna(subset=["text"])
     df["label"] = df["label"].astype(int)
     train_df, test_df = train_test_split(
         df, test_size=0.2, random_state=42, stratify=df["label"]
@@ -107,11 +140,13 @@ def main():
         weight_decay=0.01,
         logging_steps=50,
         eval_strategy="epoch",
-        # Checkpoint every epoch. A four-hour CPU run was lost once because
-        # weights were only written after the final step; a crash or a closed
-        # session at 99% left nothing behind.
-        save_strategy="epoch",
-        save_total_limit=1,
+        # Checkpoint every 100 steps (~10 minutes on CPU). A four-hour run was
+        # once lost because weights were only written at the end; per-epoch
+        # checkpoints were not enough either - the laptop slept at 99% of the
+        # second epoch and an hour of work went back to the epoch-1 save.
+        save_strategy="steps",
+        save_steps=SAVE_EVERY,
+        save_total_limit=2,
         report_to="none",
     )
 
@@ -122,10 +157,11 @@ def main():
         eval_dataset=test_ds,
         data_collator=DataCollatorWithPadding(tokenizer),
         compute_metrics=compute_metrics,
+        callbacks=[SaveEverySteps()],
     )
 
     print("Training...")
-    trainer.train()
+    trainer.train(resume_from_checkpoint=True if args.resume else None)
 
     # Save before anything else so a later crash cannot lose the weights.
     model.save_pretrained(out_dir)
@@ -141,6 +177,7 @@ def main():
 
     (out_dir / "training_summary.json").write_text(json.dumps({
         "base_model": args.model,
+        "data": Path(args.data).name,
         "trained_at": datetime.now(timezone.utc).isoformat(),
         "epochs": args.epochs,
         "max_length": args.max_length,

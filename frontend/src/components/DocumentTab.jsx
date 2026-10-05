@@ -1,5 +1,6 @@
 import React, { useRef, useState } from 'react';
 import { FileUp, FileText, ShieldCheck, ShieldAlert, Loader2 } from 'lucide-react';
+import { api } from '../api';
 
 const ACCEPT = '.pdf,.docx,.txt,.md,.csv';
 
@@ -22,15 +23,9 @@ export default function DocumentTab() {
     body.append('file', file);
 
     try {
-      const res = await fetch('/api/scan-document', { method: 'POST', body });
-      const data = await res.json();
-      if (!res.ok) {
-        setError(data.detail || `Scan failed (HTTP ${res.status})`);
-      } else {
-        setResult(data);
-      }
+      setResult(await api.upload('/api/scan-document', body));
     } catch (err) {
-      setError(`Could not reach the server: ${err.message}`);
+      setError(err.message);
     } finally {
       setBusy(false);
     }

@@ -146,3 +146,53 @@ def generate(message: str, history: Optional[List[dict]] = None) -> str:
     if provider == "anthropic":
         return _anthropic(message, history)
     raise LLMError(f"Unknown LLM_PROVIDER '{provider}'")
+
+
+# --- Customer upstream (the /v1 proxy) -------------------------------------
+# The customer supplies this URL and our server calls it, which makes it a
+# server-side request forgery vector: a URL pointing at 169.254.169.254 or a
+# private address would let a customer probe the hosting network. Only https
+# URLs whose every resolved address is public are accepted, redirects are not
+# followed, and the check runs again at call time in case DNS changed.
+def assert_public_https_url(url: str) -> None:
+    import ipaddress
+    import socket
+    from urllib.parse import urlparse
+
+    parsed = urlparse(url)
+    if parsed.scheme != "https" or not parsed.hostname:
+        raise ValueError("Upstream URL must start with https://")
+    if parsed.username or parsed.password:
+        raise ValueError("Put the API key in the key field, not in the URL")
+    try:
+        infos = socket.getaddrinfo(parsed.hostname, parsed.port or 443, type=socket.SOCK_STREAM)
+    except socket.gaierror:
+        raise ValueError(f"Cannot resolve host '{parsed.hostname}'")
+    for info in infos:
+        address = ipaddress.ip_address(info[4][0])
+        if not address.is_global:
+            raise ValueError("Upstream URL must resolve to a public internet address")
+
+
+def forward_chat_completion(base_url: str, api_key: str, payload: dict) -> tuple[int, dict]:
+    """Send an OpenAI-format chat request to the customer's own provider.
+
+    No retries: the customer is billed per call and their client already
+    decides how to retry.
+    """
+    url = f"{base_url.rstrip('/')}/chat/completions"
+    assert_public_https_url(url)
+    try:
+        resp = requests.post(
+            url,
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json=payload, timeout=TIMEOUT, allow_redirects=False,
+        )
+    except requests.RequestException as exc:
+        raise LLMError(f"Could not reach your upstream provider: {exc}") from exc
+    try:
+        body = resp.json()
+    except ValueError:
+        body = {"error": {"message": resp.text[:300] or f"HTTP {resp.status_code}",
+                          "type": "upstream_error"}}
+    return resp.status_code, body

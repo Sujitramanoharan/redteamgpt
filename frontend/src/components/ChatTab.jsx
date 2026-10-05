@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Send, ShieldCheck, ShieldAlert, Sparkles, ChevronDown, Trash2 } from 'lucide-react';
+import { api } from '../api';
 
 const STARTERS = [
   { label: 'Explain about AI', text: 'Explain about AI', kind: 'safe' },
@@ -41,7 +42,7 @@ export default function ChatTab() {
   const endRef = useRef(null);
 
   useEffect(() => {
-    fetch('/api/chat/status').then(r => r.json()).then(setStatus).catch(() => {});
+    api.get('/api/chat/status').then(setStatus).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -58,12 +59,7 @@ export default function ChatTab() {
     setBusy(true);
 
     try {
-      const res = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: content, history: history.slice(-12) }),
-      });
-      const data = await res.json();
+      const data = await api.post('/api/chat', { message: content, history: history.slice(-12) });
       setMessages(prev => [...prev, {
         role: 'assistant',
         content: data.reply,

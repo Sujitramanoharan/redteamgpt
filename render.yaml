@@ -1,0 +1,81 @@
+# Render Blueprint: one Docker web service plus a managed Postgres database.
+# Deploy: Render dashboard -> New -> Blueprint -> pick this repository.
+# Values marked `sync: false` are prompted for on first deploy; see RUNBOOK.md.
+services:
+  - type: web
+    name: redteamgpt
+    runtime: docker
+    # See RUNBOOK.md "Scaling" for measured memory; start here and check the
+    # Metrics tab before moving to a smaller plan.
+    plan: standard
+    region: singapore
+    healthCheckPath: /ready
+    autoDeploy: false
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: redteamgpt-db
+          property: connectionString
+      # Encrypts customers' stored LLM keys. Rotating it makes those keys
+      # unreadable (customers must re-enter them), so generate once and keep.
+      - key: ENCRYPTION_KEY
+        generateValue: true
+      - key: METRICS_TOKEN
+        generateValue: true
+      # Your public URL. Defaults to Render's onrender.com address; set it when
+      # you add a custom domain so email links point at the right place.
+      - key: APP_BASE_URL
+        sync: false
+
+      # --- Detector model (Hugging Face Hub) ---
+      - key: MODEL_HUB_ID
+        sync: false
+      - key: MODEL_HUB_REVISION
+        sync: false
+      - key: HF_TOKEN
+        sync: false
+      # The image ships ONNX Runtime only. Publish models with model.onnx
+      # (python src/export_onnx.py) - the app refuses to start without it.
+      - key: INFERENCE_BACKEND
+        value: onnx
+
+      # --- Email (any SMTP provider) ---
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_USERNAME
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_FROM
+        sync: false
+
+      # --- Assistant tab (the platform's own LLM key, capped per org per day) ---
+      - key: LLM_PROVIDER
+        value: gemini
+      - key: LLM_API_KEY
+        sync: false
+      - key: LLM_MODEL
+        value: gemini-flash-latest
+      - key: DEFAULT_CHAT_DAILY_CAP
+        value: "50"
+
+      - key: RATE_LIMIT_PER_MINUTE
+        value: "60"
+      - key: WEB_CONCURRENCY
+        value: "1"
+      - key: LOG_JSON
+        value: "true"
+
+databases:
+  - name: redteamgpt-db
+    databaseName: redteamgpt
+    user: redteamgpt
+    plan: basic-256mb
+    region: singapore
+    # No access from the public internet: only services in this account can
+    # connect, over Render's private network.
+    ipAllowList: []

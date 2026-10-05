@@ -1,0 +1,33 @@
+# Serving-only dependencies for the production image (INFERENCE_BACKEND=onnx).
+# No torch, datasets, pandas or training tools: the image is far smaller and
+# the process uses far less memory. requirements.txt remains the full set for
+# training, evaluation and tests.
+fastapi==0.141.1
+starlette==1.6.0
+uvicorn==0.52.4
+pydantic==2.13.5
+pydantic-settings==2.15.0
+pydantic_core==2.46.5
+python-dotenv==1.2.3
+prometheus-client==0.26.0
+python-multipart==0.0.32
+transformers==5.16.1
+tokenizers==0.23.2
+huggingface_hub==1.30.0
+safetensors==0.8.0
+numpy==2.4.6
+onnxruntime==1.30.0
+truststore==0.10.4
+requests==2.34.2
+SQLAlchemy==2.1.1
+alembic==1.20.0
+Mako==1.4.3
+argon2-cffi==25.1.0
+cryptography==50.0.1
+email-validator==2.3.0
+dnspython==2.8.0
+pypdf==6.19.0
+python-docx==1.2.0
+redis==8.1.0
+sentry-sdk==2.71.0
+psycopg[binary]==3.3.6

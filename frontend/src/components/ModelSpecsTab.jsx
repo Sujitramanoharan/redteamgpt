@@ -1,17 +1,18 @@
 import React, { useEffect, useState } from 'react';
 import { AlertTriangle } from 'lucide-react';
+import { api } from '../api';
 
 const pct = (v) => (v == null ? '--' : `${(v * 100).toFixed(1)}%`);
 const num = (v) => (v == null ? '--' : v.toFixed(3));
 
 export default function ModelSpecsTab() {
   const [info, setInfo] = useState(null);
+  const [served, setServed] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch('/api/metrics')
-      .then((r) => r.json())
-      .then((d) => setInfo(d.model_info))
+    api.get('/api/metrics')
+      .then((d) => { setInfo(d.model_info); setServed(d.model); })
       .catch(() => setInfo(null))
       .finally(() => setLoading(false));
   }, []);
@@ -31,6 +32,19 @@ export default function ModelSpecsTab() {
             evaluation run, not hardcoded.
           </p>
         </div>
+        {served && (
+          <div className="quick-stats-pills">
+            <span className="stat-pill" title={`Weights sha256 ${served.weights_sha256 || 'unknown'}`}>
+              Serving: <strong>{served.name}</strong>
+              {served.weights_sha256 && <> · <code>{served.weights_sha256}</code></>}
+            </span>
+            {served.trained_at && (
+              <span className="stat-pill">
+                Trained: <strong>{new Date(served.trained_at).toLocaleDateString()}</strong>
+              </span>
+            )}
+          </div>
+        )}
         {info?.evaluated_at && (
           <div className="quick-stats-pills">
             <span className="stat-pill">
