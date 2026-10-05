@@ -87,6 +87,22 @@ Production-shaped stack (app plus Postgres, the same container Render runs):
 docker compose up --build        # http://localhost:7860
 ```
 
+### Laptop demo with a public link
+
+Runs the production configuration (Postgres, ONNX, secure cookies) on this machine and
+publishes it through a free Cloudflare quick tunnel. No account or card is needed.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\start-demo.ps1
+```
+
+The script starts Docker Desktop if needed, then the database, the tunnel and the app, and
+prints a `https://<random>.trycloudflare.com` link to share. It needs
+`models/detector-v6/model.onnx` and `cloudflared` (default `C:\dev	ools\cloudflared.exe`).
+The link works only while the window is open and the laptop is awake, and it changes on every
+start. Accounts and logs persist between runs in the `rtg-demo-pgdata` Docker volume. This is
+for demos, not for real users.
+
 ## Using the API
 
 Create a key under **Settings → API keys** and send it in `X-API-Key`:
