@@ -62,8 +62,8 @@ def simple_paraphrase(text):
     return p + t
 
 
-def evaluate():
-    df = pd.read_csv(DATA).dropna(subset=["text"])
+def evaluate(data_path=DATA):
+    df = pd.read_csv(data_path).dropna(subset=["text"])
     # same split as training so we test on held-out data
     _, test_df = train_test_split(df, test_size=0.2, random_state=42, stratify=df["label"])
     print(f"Evaluating on {len(test_df)} held-out prompts...")
@@ -114,7 +114,7 @@ def evaluate():
     metrics = {
         "status": "OPERATIONAL",
         "architecture": _describe_model(),
-        "training_dataset": "Jailbreak-Classification + AdvBench + JailbreakBench + Alpaca",
+        "training_dataset": Path(data_path).name,
         "evaluated_at": datetime.now(timezone.utc).isoformat(),
         "test_set_size": int(len(test_df)),
         "metrics": {
@@ -156,4 +156,9 @@ def evaluate():
 
 
 if __name__ == "__main__":
-    evaluate()
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Evaluate the served model on its own test split.")
+    # Must be the CSV the model was trained on, so the split matches training.
+    parser.add_argument("--data", default=str(DATA))
+    evaluate(parser.parse_args().data)

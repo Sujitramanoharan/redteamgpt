@@ -93,8 +93,13 @@ Runs the production configuration (Postgres, ONNX, secure cookies) on this machi
 publishes it through a free Cloudflare quick tunnel. No account or card is needed.
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\start-demo.ps1
+powershell -ExecutionPolicy Bypass -File scripts\start-demo.ps1          # public link
+powershell -ExecutionPolicy Bypass -File scripts\start-demo.ps1 -Local   # this laptop only
 ```
+
+Office networks often block Cloudflare Tunnel (outbound port 7844). The script detects
+this and says so instead of printing a dead link. On such networks use `-Local` and share
+your screen; it needs no tunnel and opens the browser at `http://localhost:7880`.
 
 The script starts Docker Desktop if needed, then the database, the tunnel and the app, and
 prints a `https://<random>.trycloudflare.com` link to share. It needs

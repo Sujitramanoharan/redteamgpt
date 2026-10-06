@@ -1,15 +1,21 @@
-# Run RedTeamGPT on this laptop with a temporary public https link.
+# Run RedTeamGPT on this laptop for a demo.
 #
-#   powershell -ExecutionPolicy Bypass -File scripts\start-demo.ps1
+#   powershell -ExecutionPolicy Bypass -File scripts\start-demo.ps1          # public https link
+#   powershell -ExecutionPolicy Bypass -File scripts\start-demo.ps1 -Local   # this laptop only
 #
-# For demos only: the link works while this window is open and the laptop is
-# awake, and changes every time you start it. Data persists between runs in a
-# Docker volume. Press Ctrl+C to stop.
+# Public mode publishes a temporary https://<random>.trycloudflare.com link.
+# Office networks often block it (Cloudflare Tunnel needs outbound port 7844);
+# the script detects that and says so. Use -Local on such networks and share
+# your screen instead - it needs no tunnel at all.
+#
+# For demos only: the app runs while this window is open and the laptop is
+# awake. Data persists between runs in a Docker volume. Press Ctrl+C to stop.
 #
 # Needs: Docker Desktop running, the venv installed, models/detector-v6 with
 # model.onnx, and cloudflared (default C:\dev\tools\cloudflared.exe).
 
 param(
+    [switch]$Local,
     [string]$Cloudflared = "C:\dev\tools\cloudflared.exe",
     [int]$Port = 7880,
     [int]$DbPort = 5434
@@ -29,7 +35,7 @@ function Step($msg) { Write-Host "`n==> $msg" -ForegroundColor Cyan }
 
 # --- Pre-flight -------------------------------------------------------------
 if (-not (Test-Path $Python)) { throw "venv not found at $Python" }
-if (-not (Test-Path $Cloudflared)) { throw "cloudflared not found at $Cloudflared" }
+if (-not $Local -and -not (Test-Path $Cloudflared)) { throw "cloudflared not found at $Cloudflared" }
 if (-not (Test-Path (Join-Path $Root "models\detector-v6\model.onnx"))) {
     throw "models\detector-v6\model.onnx is missing. Run: python src\export_onnx.py --model models\detector-v6"
 }
@@ -77,27 +83,50 @@ for ($i = 0; $i -lt 30; $i++) {
 Write-Host "    database ready"
 
 # --- Public tunnel ----------------------------------------------------------
-Step "Opening the public link (Cloudflare Tunnel)"
-if (Test-Path $TunnelLog) { Remove-Item $TunnelLog }
-$tunnel = Start-Process -FilePath $Cloudflared -PassThru -WindowStyle Hidden `
-    -ArgumentList "tunnel", "--no-autoupdate", "--protocol", "http2", "--url", "http://127.0.0.1:$Port" `
-    -RedirectStandardError $TunnelLog
-$PublicUrl = $null
-for ($i = 0; $i -lt 60 -and -not $PublicUrl; $i++) {
-    Start-Sleep -Seconds 1
-    if (Test-Path $TunnelLog) {
-        $m = Select-String -Path $TunnelLog -Pattern "https://[a-z0-9-]+\.trycloudflare\.com" | Select-Object -First 1
-        if ($m) { $PublicUrl = $m.Matches[0].Value }
+$tunnel = $null
+if ($Local) {
+    $PublicUrl = "http://localhost:$Port"
+} else {
+    Step "Opening the public link (Cloudflare Tunnel)"
+    if (Test-Path $TunnelLog) { Remove-Item $TunnelLog }
+    $tunnel = Start-Process -FilePath $Cloudflared -PassThru -WindowStyle Hidden `
+        -ArgumentList "tunnel", "--no-autoupdate", "--protocol", "http2", "--url", "http://127.0.0.1:$Port" `
+        -RedirectStandardError $TunnelLog
+    # cloudflared prints the URL before it has actually connected, so wait for
+    # a registered connection: a printed link on a blocked network is a dead link.
+    $PublicUrl = $null; $connected = $false
+    for ($i = 0; $i -lt 45 -and -not $connected; $i++) {
+        Start-Sleep -Seconds 1
+        if (Test-Path $TunnelLog) {
+            $m = Select-String -Path $TunnelLog -Pattern "https://[a-z0-9-]+\.trycloudflare\.com" | Select-Object -First 1
+            if ($m) { $PublicUrl = $m.Matches[0].Value }
+            $connected = [bool](Select-String -Path $TunnelLog -Pattern "Registered tunnel connection" -Quiet)
+        }
     }
-}
-if (-not $PublicUrl) {
-    Stop-Process -Id $tunnel.Id -Force -ErrorAction SilentlyContinue
-    throw "Could not open the tunnel. See $TunnelLog"
+    if (-not $connected) {
+        Stop-Process -Id $tunnel.Id -Force -ErrorAction SilentlyContinue
+        Write-Host ""
+        Write-Host "  The public link could not connect. This network blocks Cloudflare Tunnel" -ForegroundColor Yellow
+        Write-Host "  (common on office networks). Either:" -ForegroundColor Yellow
+        Write-Host "    - switch to home Wi-Fi or a phone hotspot and run this again, or" -ForegroundColor Yellow
+        Write-Host "    - run it with -Local and share your screen:" -ForegroundColor Yellow
+        Write-Host "        powershell -ExecutionPolicy Bypass -File scripts\start-demo.ps1 -Local" -ForegroundColor Yellow
+        Write-Host "  Details: $TunnelLog" -ForegroundColor Yellow
+        exit 1
+    }
 }
 
 # --- App --------------------------------------------------------------------
-Step "Starting RedTeamGPT (production mode)"
-$env:ENVIRONMENT = "production"
+if ($Local) {
+    # Production mode refuses a plain-http address (session cookies must be
+    # Secure), so the local demo runs in development mode with the same
+    # database, model and code.
+    Step "Starting RedTeamGPT (local demo)"
+    $env:ENVIRONMENT = "development"
+} else {
+    Step "Starting RedTeamGPT (production mode)"
+    $env:ENVIRONMENT = "production"
+}
 $env:APP_BASE_URL = $PublicUrl
 $env:DATABASE_URL = "postgresql://rtg:rtg-demo-local@127.0.0.1:${DbPort}/redteamgpt"
 $env:ENCRYPTION_KEY = $EncryptionKey
@@ -107,11 +136,20 @@ $env:MODEL_DIR = "models/detector-v6"
 $env:AUTO_MIGRATE = "true"
 $env:LOG_JSON = "false"
 
+# Open the browser once the app is actually ready.
+Start-Process powershell -WindowStyle Hidden -ArgumentList "-NoProfile", "-Command", `
+    "for (`$i=0; `$i -lt 120; `$i++) { try { Invoke-WebRequest -UseBasicParsing http://127.0.0.1:$Port/ready -TimeoutSec 2 | Out-Null; Start-Process '$PublicUrl'; break } catch { Start-Sleep 1 } }"
+
 Write-Host ""
 Write-Host "  ============================================================" -ForegroundColor Green
-Write-Host "   Share this link:  $PublicUrl" -ForegroundColor Green
-Write-Host "   (open it yourself too - sign-in only works on this link)" -ForegroundColor Green
-Write-Host "   Ready in about 30 seconds. Press Ctrl+C to stop." -ForegroundColor Green
+if ($Local) {
+    Write-Host "   Open on this laptop:  $PublicUrl" -ForegroundColor Green
+    Write-Host "   Share your screen to show it. (Not reachable from other devices.)" -ForegroundColor Green
+} else {
+    Write-Host "   Share this link:  $PublicUrl" -ForegroundColor Green
+    Write-Host "   (open it yourself too - sign-in only works on this link)" -ForegroundColor Green
+}
+Write-Host "   The browser opens by itself when ready (~30 s). Ctrl+C to stop." -ForegroundColor Green
 Write-Host "  ============================================================" -ForegroundColor Green
 Write-Host ""
 
@@ -121,7 +159,9 @@ try {
     & $Python -m uvicorn backend.main:app --host 127.0.0.1 --port $Port `
         --proxy-headers --forwarded-allow-ips "127.0.0.1"
 } finally {
-    Step "Stopping the public link"
-    Stop-Process -Id $tunnel.Id -Force -ErrorAction SilentlyContinue
+    if ($tunnel) {
+        Step "Stopping the public link"
+        Stop-Process -Id $tunnel.Id -Force -ErrorAction SilentlyContinue
+    }
     Write-Host "    stopped. The database keeps running in Docker; it starts again next time."
 }
