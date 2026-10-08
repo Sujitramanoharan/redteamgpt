@@ -1,3 +1,7 @@
 # Scripts run inside Linux containers; CRLF endings break the shebang.
 *.sh text eol=lf
 Dockerfile text eol=lf
+# Binary files must never have line endings rewritten.
+*.pdf binary
+*.png binary
+*.onnx binary
