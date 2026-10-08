@@ -12,3 +12,6 @@ models/
 .pytest_cache/
 .cache/
 *.bak
+
+# Generated reports stay local.
+docs/*.pdf
