@@ -27,18 +27,18 @@
       "passes": false
     },
     {
-      "onnx_file": "model.fp32.onnx",
+      "onnx_file": "model.fp16.onnx",
       "prompts": 1238,
       "verdict_agreement": 1.0,
       "flipped_verdicts": 0,
       "flipped_examples": [],
-      "max_probability_delta": 0.0,
-      "mean_ms_torch": 194.7,
-      "mean_ms_onnx": 144.1,
-      "size_mb": 267.9,
-      "variant": "fp32",
+      "max_probability_delta": 0.0065,
+      "mean_ms_torch": 291.9,
+      "mean_ms_onnx": 198.1,
+      "size_mb": 134.1,
+      "variant": "fp16",
       "passes": true
     }
   ],
-  "chosen": "fp32"
+  "chosen": "fp16"
 }

@@ -9,7 +9,8 @@ agrees on at least 99.5% of verdicts is kept.
 Plain dynamic int8 quantisation of everything failed that bar on v5 (96.3%,
 46 flipped verdicts, mostly long role-play prompts), so the candidates are, in
 order of preference: int8 on MatMul weights only with per-channel scales, then
-full-precision ONNX.
+fp16 (half the file size; on v6 it agreed on 100% of verdicts and is what lets
+the service fit a 512 MB host), then full precision.
 
     python src/export_onnx.py --model models/detector-v6
     # then serve it with INFERENCE_BACKEND=onnx
@@ -59,6 +60,16 @@ def quantise_matmul(fp32: Path) -> Path:
     # large MatMul weights are quantised, each output channel with its own scale.
     quantize_dynamic(str(fp32), str(out), weight_type=QuantType.QInt8,
                      per_channel=True, reduce_range=True, op_types_to_quantize=["MatMul"])
+    return out
+
+
+def to_fp16(fp32: Path) -> Path:
+    import onnx
+    from onnxconverter_common import float16
+
+    out = fp32.with_name("model.fp16.onnx")
+    # Inputs and outputs stay int64 / fp32 so the serving code is unchanged.
+    onnx.save(float16.convert_float_to_float16(onnx.load(str(fp32)), keep_io_types=True), str(out))
     return out
 
 
@@ -134,7 +145,8 @@ def main() -> int:
 
     model_dir = Path(args.model)
     fp32 = export_fp32(model_dir)
-    candidates = [("int8-matmul-per-channel", quantise_matmul(fp32)), ("fp32", fp32)]
+    candidates = [("int8-matmul-per-channel", quantise_matmul(fp32)),
+                  ("fp16", to_fp16(fp32)), ("fp32", fp32)]
 
     reports, chosen = [], None
     for name, path in candidates:

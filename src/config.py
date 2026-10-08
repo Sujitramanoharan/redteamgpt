@@ -80,6 +80,9 @@ class Settings(BaseSettings):
     # load a lower value usually wins, because requests already run in
     # parallel and per-inference threads then compete for the same cores.
     torch_threads: int = 0
+    # Model passes allowed to run at the same time. Each holds its own working
+    # memory; set 1 on a 512 MB instance so bursts queue instead of crashing.
+    max_concurrent_inferences: int = 2
 
     # --- Assistant LLM ----------------------------------------------------
     # gemini | groq | openai | anthropic | none. Without a key the firewall

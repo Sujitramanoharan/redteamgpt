@@ -20,7 +20,10 @@ ENV PYTHONUNBUFFERED=1 \
     HF_HOME=/app/.cache/huggingface \
     ENVIRONMENT=production \
     AUTO_MIGRATE=false \
-    INFERENCE_BACKEND=onnx
+    INFERENCE_BACKEND=onnx \
+    # glibc otherwise keeps a memory arena per thread; capping them keeps a
+    # threaded Python server well inside a 512 MB instance.
+    MALLOC_ARENA_MAX=2
 
 WORKDIR /app
 

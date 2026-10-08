@@ -1,0 +1,67 @@
+# Render Blueprint for the FREE plan: one Docker web service, no paid add-ons.
+# Deploy: Render -> New -> Blueprint -> this repository -> Blueprint Path: render.free.yaml
+#
+# Free-plan trade-offs (measured with a 512 MB / 0.1 CPU container locally):
+# - fits in memory: peak 469 MB of 512 under a burst of long prompts
+# - normal scans ~0.4 s; very long prompts and large documents are slow
+# - the service sleeps after ~15 minutes idle; the first visit then takes 1-2
+#   minutes while it starts and downloads the model
+# The database is external (Neon free Postgres), because Render allows one free
+# database per account and free Render databases expire. See RUNBOOK.md.
+services:
+  - type: web
+    name: redteamgpt
+    runtime: docker
+    plan: free
+    region: singapore
+    healthCheckPath: /ready
+    autoDeploy: false
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      # Neon connection string (postgresql://...?sslmode=require); entered on
+      # first deploy and never committed.
+      - key: DATABASE_URL
+        sync: false
+      - key: ENCRYPTION_KEY
+        generateValue: true
+      - key: METRICS_TOKEN
+        generateValue: true
+
+      # --- Detector model: fp16 ONNX, pinned ---
+      - key: MODEL_HUB_ID
+        value: Sujimano/redteamgpt-detector-v6
+      - key: MODEL_HUB_REVISION
+        value: ea647eea7169d1bc57ce05d3e26151f3e1a9f969
+      - key: HF_TOKEN
+        sync: false
+      - key: INFERENCE_BACKEND
+        value: onnx
+
+      # --- Fit 512 MB / 0.1 CPU ---
+      - key: WEB_CONCURRENCY
+        value: "1"
+      - key: TORCH_THREADS
+        value: "1"
+      - key: MAX_CONCURRENT_INFERENCES
+        value: "1"
+
+      # --- No email provider yet: sign-up logs users in directly. Add SMTP_*
+      # and remove this before inviting the public. ---
+      - key: EMAIL_VERIFICATION_REQUIRED
+        value: "false"
+
+      # --- Assistant tab (optional; capped per organisation per day) ---
+      - key: LLM_PROVIDER
+        value: gemini
+      - key: LLM_API_KEY
+        sync: false
+      - key: LLM_MODEL
+        value: gemini-flash-latest
+      - key: DEFAULT_CHAT_DAILY_CAP
+        value: "20"
+
+      - key: RATE_LIMIT_PER_MINUTE
+        value: "30"
+      - key: LOG_JSON
+        value: "true"

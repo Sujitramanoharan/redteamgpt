@@ -11,12 +11,13 @@ import json
 import logging
 import os
 import re
+import threading
 from datetime import datetime, timezone
 from typing import Optional
 from pathlib import Path
 
 import numpy as np
-from transformers import AutoTokenizer
+from tokenizers import Tokenizer
 
 from config import settings
 from normalizer import describe as normalizer_describe
@@ -82,7 +83,27 @@ def _model_identity(source: str) -> dict:
 ONNX_FILE = "model.onnx"
 MODEL_SOURCE = _resolve_model_source()
 MODEL_INFO = _model_identity(MODEL_SOURCE)
-_tokenizer = AutoTokenizer.from_pretrained(MODEL_SOURCE)
+
+
+def _load_tokenizer(source: str) -> tuple[Tokenizer, int]:
+    """The fast tokenizer on its own, without importing transformers.
+
+    transformers' AutoTokenizer wraps this same Rust tokenizer but costs about
+    40 MB more memory; on a 512 MB host that margin matters. Verified to give
+    identical windows, ids and masks on all 1,194 held-out texts.
+    """
+    root = Path(source)
+    tok = Tokenizer.from_file(str(root / "tokenizer.json"))
+    pad_token = "[PAD]"
+    cfg_path = root / "tokenizer_config.json"
+    if cfg_path.exists():
+        pad_token = json.loads(cfg_path.read_text(encoding="utf-8")).get("pad_token") or pad_token
+    pad_id = tok.token_to_id(pad_token)
+    tok.no_padding()  # padding is applied per prompt below, like padding=True
+    return tok, (pad_id if pad_id is not None else 0)
+
+
+_tokenizer, _PAD_ID = _load_tokenizer(MODEL_SOURCE)
 # Intra-op threads per inference. FastAPI already runs sync endpoints in a
 # threadpool, so under concurrent load several inferences run at once; giving
 # each one several threads oversubscribes the cores and they fight. Measured
@@ -101,6 +122,11 @@ if settings.inference_backend == "onnx":
                            "Run `python src/export_onnx.py --model <dir>` first.")
     _opts = ort.SessionOptions()
     _opts.intra_op_num_threads = _THREADS
+    # The memory arena pre-allocates and keeps a large pool for activations.
+    # Turning it off cut the process from ~467 MB to ~380 MB with identical
+    # outputs, which is what lets the service fit a 512 MB free instance.
+    _opts.enable_cpu_mem_arena = False
+    _opts.enable_mem_pattern = False
     _session = ort.InferenceSession(str(_onnx_path), _opts, providers=["CPUExecutionProvider"])
 
     def _logits(input_ids: np.ndarray, attention_mask: np.ndarray) -> np.ndarray:
@@ -120,7 +146,17 @@ else:
 
 MAX_LEN = settings.max_sequence_length
 STRIDE = settings.chunk_stride
+_tokenizer.enable_truncation(max_length=MAX_LEN, stride=STRIDE)
 MAX_WINDOWS = 32  # ceiling so an enormous prompt cannot exhaust CPU
+# Windows scored per forward pass. Running all 32 at once pushed peak memory
+# past 512 MB; batches of 8 give identical scores with a fraction of the
+# activation memory.
+WINDOW_BATCH = 8
+# How many model forward passes may run at once. The web server handles many
+# requests in parallel, and each pass holds its own activation memory: six
+# concurrent long prompts got a 512 MB container OOM-killed. Extra requests
+# now wait their turn; on a small CPU they gain nothing from running together.
+_INFERENCE_SLOTS = threading.BoundedSemaphore(max(1, settings.max_concurrent_inferences))
 
 
 def _score_windows(text: str) -> tuple[float, int]:
@@ -130,19 +166,18 @@ def _score_windows(text: str) -> tuple[float, int]:
     behind harmless filler. Scoring every window and taking the maximum means
     the attack is caught wherever it sits in the text.
     """
-    enc = _tokenizer(
-        text,
-        truncation=True,
-        max_length=MAX_LEN,
-        stride=STRIDE,
-        return_overflowing_tokens=True,
-        padding=True,
-        return_tensors="np",
-    )
-    input_ids = enc["input_ids"][:MAX_WINDOWS].astype(np.int64)
-    attention_mask = enc["attention_mask"][:MAX_WINDOWS].astype(np.int64)
+    first = _tokenizer.encode(text)
+    windows = ([first] + list(first.overflowing))[:MAX_WINDOWS]
+    width = max(len(w.ids) for w in windows)
+    input_ids = np.array([w.ids + [_PAD_ID] * (width - len(w.ids)) for w in windows], dtype=np.int64)
+    attention_mask = np.array([w.attention_mask + [0] * (width - len(w.attention_mask))
+                               for w in windows], dtype=np.int64)
 
-    logits = _logits(input_ids, attention_mask)
+    with _INFERENCE_SLOTS:
+        logits = np.concatenate([
+            _logits(input_ids[i:i + WINDOW_BATCH], attention_mask[i:i + WINDOW_BATCH])
+            for i in range(0, input_ids.shape[0], WINDOW_BATCH)
+        ])
     exp = np.exp(logits - logits.max(axis=1, keepdims=True))  # stable softmax
     probs = exp[:, 1] / exp.sum(axis=1)
     return float(probs.max()), int(input_ids.shape[0])

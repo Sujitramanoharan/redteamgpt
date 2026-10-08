@@ -71,6 +71,31 @@ Steps:
 8. Send one real sign-up to an address you control, and check that the email arrives and isn't
    in spam.
 
+### Free plan (no card)
+
+`render.free.yaml` deploys the web service on Render's free plan. The database
+is a free Neon Postgres, because Render allows one free database per account.
+
+1. On **neon.tech**, create a free project in the Singapore region (AWS
+   ap-southeast-1) and copy its connection string (`postgresql://...?sslmode=require`).
+2. In Render, go to **New → Blueprint**, pick the repository, and set
+   **Blueprint Path** to `render.free.yaml`.
+3. Enter `DATABASE_URL` (the Neon string), `HF_TOKEN` (a Hugging Face read
+   token) and, optionally, `LLM_API_KEY`. Everything else is preset.
+
+What to expect, measured with a 512 MB / 0.1 CPU container:
+
+- Memory fits, with a peak of 469 MB under a burst of long prompts. This
+  relies on the fp16 ONNX model, the arena-free ONNX session, the lightweight
+  tokenizer and `MAX_CONCURRENT_INFERENCES=1`.
+- Normal scans take about 0.4 s. Very long prompts take about 15 s, and a
+  100-passage document takes several minutes.
+- The service sleeps after about 15 minutes without visitors, and the first
+  request afterwards takes 1–2 minutes.
+
+Use it for demos and trials. Move to `render.yaml` (Standard plan) for real
+users.
+
 ### Custom domain
 
 Add the domain under the service's **Settings → Custom Domains**. Render issues the TLS

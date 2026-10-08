@@ -94,3 +94,8 @@ dnspython==2.8.0
 # Optional at runtime: used only when REDIS_URL / SENTRY_DSN are set.
 redis==8.1.0
 sentry-sdk==2.71.0
+
+# ONNX export (src/export_onnx.py)
+onnx==1.23.0
+onnxconverter-common==1.16.0
+onnxruntime==1.30.0
